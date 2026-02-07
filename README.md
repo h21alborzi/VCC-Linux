@@ -24,7 +24,7 @@ A desktop GUI application for batch video transcoding using **FFmpeg**. VCC prov
 
 ---
 
-## Demo
+## Demo of V1.0.0
 
 https://github.com/user-attachments/assets/78081d13-48a5-4e26-8a31-9624fa97d425
 
