@@ -26,9 +26,7 @@ A desktop GUI application for batch video transcoding using **FFmpeg**. VCC prov
 
 ## Demo
 
-https://github.com/pouyaardehkhani/VCC/raw/master/demo/demo.mp4
-
-> Click the video above to see VCC in action.
+https://github.com/user-attachments/assets/78081d13-48a5-4e26-8a31-9624fa97d425
 
 ---
 
