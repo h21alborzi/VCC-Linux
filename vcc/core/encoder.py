@@ -1,0 +1,173 @@
+"""
+FFmpeg encoder worker - runs encoding in a background thread, emitting signals for UI updates.
+"""
+
+import os
+import subprocess
+from PyQt6.QtCore import QThread, pyqtSignal
+
+
+class EncoderWorker(QThread):
+    """
+    Runs FFmpeg encoding for a list of files.
+    Emits signals for log output, progress, and completion.
+    """
+
+    log_output = pyqtSignal(str)        # raw line from ffmpeg
+    file_started = pyqtSignal(int, int, str)  # index, total, filename
+    file_finished = pyqtSignal(int, int, str, bool)  # index, total, filename, success
+    encoding_done = pyqtSignal()        # all files done
+    encoding_error = pyqtSignal(str)    # fatal error message
+
+    def __init__(
+        self,
+        files: list[str],
+        output_dir: str,
+        width: int,
+        height: int,
+        codec: str,
+        codec_params: dict[str, str],
+        pix_fmt: str,
+        audio_codec: str = "copy",
+        subtitle_codec: str = "copy",
+        overwrite: bool = False,
+        parent=None,
+    ):
+        super().__init__(parent)
+        self.files = files
+        self.output_dir = output_dir
+        self.width = width
+        self.height = height
+        self.codec = codec
+        self.codec_params = codec_params  # {"preset": "8", "crf": "32", ...}
+        self.pix_fmt = pix_fmt
+        self.audio_codec = audio_codec
+        self.subtitle_codec = subtitle_codec
+        self.overwrite = overwrite
+        self._cancelled = False
+
+    def cancel(self):
+        self._cancelled = True
+        if hasattr(self, "_process") and self._process and self._process.poll() is None:
+            self._process.terminate()
+
+    def build_ffmpeg_args(self, src: str, dst: str) -> list[str]:
+        """Build the ffmpeg argument list for a single file."""
+        ow_flag = "-y" if self.overwrite else "-n"
+        scale_filter = f"scale={self.width}:{self.height}"
+
+        args = [
+            "ffmpeg",
+            "-hide_banner",
+            ow_flag,
+            "-i", src,
+            "-map_metadata", "0",
+            "-map_chapters", "0",
+            "-map", "0:v:0",
+            "-map", "0:a?",
+            "-map", "0:s?",
+            "-vf", scale_filter,
+            "-c:v", self.codec,
+        ]
+
+        # Add codec-specific params (skip empty tune etc.)
+        for key, value in self.codec_params.items():
+            if value is not None and str(value).strip():
+                args.extend([f"-{key}", str(value)])
+
+        if self.pix_fmt and self.pix_fmt.strip():
+            args.extend(["-pix_fmt", self.pix_fmt])
+
+        args.extend([
+            "-c:a", self.audio_codec,
+            "-c:s", self.subtitle_codec,
+            dst,
+        ])
+
+        return args
+
+    def make_output_name(self, src_path: str) -> str:
+        """Generate output filename like: basename.WxH.codec.paramN.mkv"""
+        base = os.path.splitext(os.path.basename(src_path))[0]
+        label = f"{self.width}x{self.height}"
+
+        # Build param suffix
+        param_parts = []
+        for key, value in self.codec_params.items():
+            if value is not None and str(value).strip():
+                param_parts.append(f"{key}{value}")
+
+        param_str = ".".join(param_parts) if param_parts else ""
+        if param_str:
+            name = f"{base}.{label}.{self.codec}.{param_str}.mkv"
+        else:
+            name = f"{base}.{label}.{self.codec}.mkv"
+
+        return os.path.join(self.output_dir, name)
+
+    def run(self):
+        total = len(self.files)
+        os.makedirs(self.output_dir, exist_ok=True)
+
+        for idx, src in enumerate(self.files, 1):
+            if self._cancelled:
+                self.log_output.emit("\n--- Encoding cancelled by user ---\n")
+                break
+
+            filename = os.path.basename(src)
+            dst = self.make_output_name(src)
+
+            if os.path.exists(dst) and not self.overwrite:
+                self.log_output.emit(f"[{idx}/{total}] SKIP (exists): {filename}\n")
+                self.file_finished.emit(idx, total, filename, True)
+                continue
+
+            self.file_started.emit(idx, total, filename)
+            self.log_output.emit(f"[{idx}/{total}] ENCODE: {filename}\n")
+
+            args = self.build_ffmpeg_args(src, dst)
+            cmd_display = " ".join(f'"{a}"' if " " in a else a for a in args)
+            self.log_output.emit(f"> {cmd_display}\n\n")
+
+            try:
+                self._process = subprocess.Popen(
+                    args,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT,
+                    text=True,
+                    bufsize=1,
+                    creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+                )
+
+                for line in self._process.stdout:
+                    if self._cancelled:
+                        self._process.terminate()
+                        break
+                    self.log_output.emit(line)
+
+                self._process.wait()
+                success = self._process.returncode == 0
+
+                if not success and not self._cancelled:
+                    self.log_output.emit(
+                        f"\n[WARNING] FFmpeg exited with code {self._process.returncode} on: {filename}\n"
+                    )
+                elif success:
+                    self.log_output.emit(f"\nDone -> {os.path.basename(dst)}\n")
+
+                self.file_finished.emit(idx, total, filename, success)
+
+            except FileNotFoundError:
+                self.encoding_error.emit(
+                    "ffmpeg not found! Please install FFmpeg and ensure ffmpeg.exe is in your system PATH."
+                )
+                return
+            except Exception as e:
+                self.log_output.emit(f"\n[ERROR] {e}\n")
+                self.file_finished.emit(idx, total, filename, False)
+
+            self.log_output.emit("\n")
+
+        if not self._cancelled:
+            self.log_output.emit("=== All done. ===\n")
+        self.encoding_done.emit()
