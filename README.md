@@ -5,13 +5,13 @@ A desktop GUI application for batch video transcoding using **FFmpeg**. VCC prov
 ![Platform](https://img.shields.io/badge/platform-Windows-blue)
 ![Python](https://img.shields.io/badge/python-3.12-green)
 ![License](https://img.shields.io/badge/license-MIT-brightgreen)
-![Release](https://img.shields.io/badge/release-v1.0.0-orange)
+![Release](https://img.shields.io/badge/release-v1.0.1-orange)
 
 ---
 
 ## Features
 
-- **7 Video Codecs** — AV1 (SVT-AV1), H.264, H.265/HEVC, VP9, AV1 (libaom), MPEG-4, AV1 (rav1e)
+- **8 Video Codecs** — AV1 (SVT-AV1), H.264, H.265/HEVC, H.266/VVC, VP9, AV1 (libaom), MPEG-4, AV1 (rav1e)
 - **15 Pixel Formats** — yuv420p, yuv420p10le, yuv444p, and more
 - **Audio Control** — Copy, re-encode (AAC/Opus/MP3/FLAC/Vorbis), or remove audio
 - **Resolution Presets** — Quick presets for 360p through 8K, or set custom dimensions
@@ -36,15 +36,24 @@ https://github.com/user-attachments/assets/78081d13-48a5-4e26-8a31-9624fa97d425
 
 | Requirement | Version | Download |
 |---|---|---|
-| **FFmpeg** | **7.1.x** (full build recommended) | [gyan.dev/ffmpeg](https://www.gyan.dev/ffmpeg/builds/) or [ffmpeg.org](https://ffmpeg.org/download.html) |
+| **FFmpeg** | **7.1.x or 8.x** (full build recommended) | [gyan.dev/ffmpeg](https://www.gyan.dev/ffmpeg/builds/) or [ffmpeg.org](https://ffmpeg.org/download.html) |
 | **Windows** | 10 or 11 (64-bit) | — |
 
-> **Important:** FFmpeg must be version **7.1.x** (full build from [gyan.dev](https://www.gyan.dev/ffmpeg/builds/) is recommended). This is the version the application was developed and tested against. The full build includes all codec libraries (libsvtav1, libx264, libx265, libvpx, libaom, librav1e, etc.).
+> **Important:** The full build is required (not essentials) to include all codec libraries.
 
 ### Step 1 — Install FFmpeg
 
-**Option A: Manual install**
-1. Download **ffmpeg-7.1.1-full_build.7z** from [gyan.dev/ffmpeg/builds](https://www.gyan.dev/ffmpeg/builds/)
+**Option A: Using winget (easiest)**
+```
+winget install Gyan.FFmpeg
+```
+Verify:
+```
+ffmpeg -version
+```
+
+**Option B: Manual install**
+1. Download the latest **full_build** from [gyan.dev/ffmpeg/builds](https://www.gyan.dev/ffmpeg/builds/)
 2. Extract the archive (e.g. to `C:\ffmpeg`)
 3. Add the `bin` folder (`C:\ffmpeg\bin`) to your system **PATH**:
    - Search "Environment Variables" in Windows Start menu
@@ -54,23 +63,14 @@ https://github.com/user-attachments/assets/78081d13-48a5-4e26-8a31-9624fa97d425
    ```
    ffmpeg -version
    ```
-   You should see `ffmpeg version 7.1.1-full_build` or similar.
 
-**Option B: Using winget (Windows Package Manager)**
-```
-winget install Gyan.FFmpeg
-```
-Then verify:
-```
-ffmpeg -version
-```
+> **Note:** VCC automatically detects FFmpeg in common locations including winget install paths.
 
 ### Step 2 — Download VCC
 
 1. Go to the [Releases](../../releases) page
-2. Download `VideoCodecConverter-v1.0.0.zip` from the latest release
-3. Extract the ZIP
-4. Double-click **`VideoCodecConverter.exe`** — no installation needed
+2. Download **`VideoCodecConverter.exe`** from the latest release
+3. Double-click to run — no installation needed
 
 > **Note:** Windows SmartScreen may show a warning the first time you run the EXE. Click **"More info" → "Run anyway"** to proceed.
 
@@ -81,11 +81,12 @@ ffmpeg -version
 | Codec | FFmpeg Encoder | Container | Use Case |
 |---|---|---|---|
 | AV1 (SVT-AV1) | `libsvtav1` | `.mkv` | Best quality/size ratio, modern |
-| H.264 | `libx264` | `.mp4` | Maximum compatibility |
-| H.265 / HEVC | `libx265` | `.mp4` | Good compression, wide support |
+| H.264 | `libx264` | `.mkv` | Maximum compatibility |
+| H.265 / HEVC | `libx265` | `.mkv` | Good compression, wide support |
+| **H.266 / VVC** | `libvvenc` | `.mkv` | **Next-gen, best compression (new!)** |
 | VP9 | `libvpx-vp9` | `.webm` | Web video, YouTube |
 | AV1 (libaom) | `libaom-av1` | `.mkv` | Reference AV1 encoder (slow) |
-| MPEG-4 | `mpeg4` | `.mp4` | Legacy compatibility |
+| MPEG-4 | `mpeg4` | `.mkv` | Legacy compatibility |
 | AV1 (rav1e) | `librav1e` | `.mkv` | Rust-based AV1 encoder |
 
 ---
@@ -98,7 +99,7 @@ ffmpeg -version
 |---|---|
 | Python | 3.12.x |
 | pip | Latest |
-| FFmpeg | 7.1.x (on PATH) |
+| FFmpeg | 7.1.x or 8.x (on PATH) |
 
 ### Setup
 
@@ -172,4 +173,5 @@ MIT License — free for personal and commercial use.
 
 ## Version History
 
+- **v1.0.1** — Added H.266/VVC codec, AV1 encoder comparison guide, FFmpeg 8.x support, auto-detection of FFmpeg in winget/common paths
 - **v1.0.0** — Initial release with full GUI, 7 codecs, batch processing, resolution presets, and standalone EXE

@@ -258,6 +258,39 @@ CODECS = {
             },
         },
     },
+    "libvvenc": {
+        "display": "H.266 / VVC (vvenc)",
+        "container": "mkv",
+        "params": {
+            "preset": {
+                "label": "Preset",
+                "type": "choice",
+                "default": "medium",
+                "choices": ["faster", "fast", "medium", "slow", "slower"],
+                "tooltip": (
+                    "Controls encoding speed vs compression efficiency.\n\n"
+                    "faster  = FASTEST encoding, WORST compression.\n"
+                    "slower  = SLOWEST encoding, BEST compression.\n\n"
+                    "Recommended: medium or slow."
+                ),
+            },
+            "qp": {
+                "label": "QP (Quality)",
+                "type": "int",
+                "default": 32,
+                "min": 0,
+                "max": 63,
+                "tooltip": (
+                    "Quantizer Parameter - controls visual quality.\n\n"
+                    "Lower value (0) = HIGHEST quality, LARGEST file.\n"
+                    "Higher value (63) = LOWEST quality, SMALLEST file.\n\n"
+                    "Recommended: 27-35 for good quality/size balance.\n"
+                    "Note: VVC/H.266 achieves ~30-50% better compression\n"
+                    "than H.265/HEVC at the same visual quality."
+                ),
+            },
+        },
+    },
 }
 
 
@@ -271,6 +304,8 @@ CODEC_HELP_TEXT = """\
 fast encoder (SVT-AV1 is highly optimized), wide and growing playback support.</li>
 <li><b>Cons:</b> Encoding is still slower than H.264/H.265, some older devices lack hardware decode.</li>
 <li><b>Best for:</b> Archiving, streaming, general purpose when you want the best size/quality ratio.</li>
+<li><b>vs libaom:</b> Much faster (10-100x) with very similar quality. Use SVT-AV1 for practical encoding.</li>
+<li><b>vs rav1e:</b> Faster and better optimized. SVT-AV1 is the recommended AV1 encoder.</li>
 </ul>
 
 <h3>H.264 (x264) &mdash; <code>libx264</code></h3>
@@ -289,6 +324,19 @@ fast encoder (SVT-AV1 is highly optimized), wide and growing playback support.</
 <li><b>Best for:</b> When you need better compression than H.264 but AV1 is too slow for your needs.</li>
 </ul>
 
+<h3>H.266 / VVC (vvenc) &mdash; <code>libvvenc</code> &nbsp;&#x1F195;</h3>
+<p><b>Next-generation successor to H.265/HEVC.</b></p>
+<ul>
+<li><b>Pros:</b> ~30-50% better compression than H.265/HEVC at the same visual quality. \
+Excellent for 4K/8K content. The newest video coding standard (finalized 2020).</li>
+<li><b>Cons:</b> Very slow encoding (newer encoder, less optimized). Very limited playback support \
+(VLC 3.0.21+, some newer devices). Only supports <code>yuv420p10le</code> pixel format. \
+Patented with complex licensing.</li>
+<li><b>Best for:</b> Future-proofing archives, 4K/8K content where file size matters most and \
+you don't need immediate wide compatibility.</li>
+<li><b>Note:</b> This is a cutting-edge codec. Playback support will grow over time.</li>
+</ul>
+
 <h3>VP9 &mdash; <code>libvpx-vp9</code></h3>
 <p><b>Google's royalty-free predecessor to AV1.</b></p>
 <ul>
@@ -298,19 +346,23 @@ fast encoder (SVT-AV1 is highly optimized), wide and growing playback support.</
 </ul>
 
 <h3>AV1 (libaom) &mdash; <code>libaom-av1</code></h3>
-<p><b>Reference AV1 encoder.</b></p>
+<p><b>Reference AV1 encoder &mdash; highest quality, extremely slow.</b></p>
 <ul>
-<li><b>Pros:</b> Best AV1 quality at low speed settings, reference implementation.</li>
+<li><b>Pros:</b> Best AV1 quality at low speed settings, reference implementation, most feature-complete.</li>
 <li><b>Cons:</b> EXTREMELY slow at low cpu-used values. Not practical for large files.</li>
 <li><b>Best for:</b> Small clips where maximum quality matters and time is not a concern.</li>
+<li><b>vs SVT-AV1:</b> libaom can produce very slightly better quality at very low speeds, but SVT-AV1 \
+is 10-100x faster with nearly identical quality. For most users, SVT-AV1 is the better choice.</li>
 </ul>
 
 <h3>AV1 (rav1e) &mdash; <code>librav1e</code></h3>
-<p><b>Rust-based AV1 encoder.</b></p>
+<p><b>Rust-based AV1 encoder &mdash; safe, experimental.</b></p>
 <ul>
-<li><b>Pros:</b> Memory-safe implementation, decent speed, royalty-free.</li>
-<li><b>Cons:</b> Generally slower than SVT-AV1, less widespread.</li>
-<li><b>Best for:</b> When you want an alternative AV1 encoder.</li>
+<li><b>Pros:</b> Memory-safe Rust implementation, royalty-free.</li>
+<li><b>Cons:</b> Generally slower than SVT-AV1, less widespread, fewer features.</li>
+<li><b>Best for:</b> When you want an alternative AV1 encoder or value memory safety.</li>
+<li><b>vs SVT-AV1:</b> SVT-AV1 is faster and more mature. rav1e is mainly of interest for \
+Rust ecosystem integration.</li>
 </ul>
 
 <h3>MPEG-4 Part 2 &mdash; <code>mpeg4</code></h3>
@@ -322,10 +374,25 @@ fast encoder (SVT-AV1 is highly optimized), wide and growing playback support.</
 </ul>
 
 <hr>
+<h3>AV1 Encoders &mdash; Which One to Choose?</h3>
+<p>VCC includes three AV1 encoders. Here's how they compare:</p>
+<table border="1" cellpadding="6" cellspacing="0">
+<tr><th>Encoder</th><th>Speed</th><th>Quality</th><th>Recommendation</th></tr>
+<tr><td><b>SVT-AV1</b></td><td>&#x1F7E2; Fast</td><td>&#x1F7E2; Excellent</td>\
+<td><b>&#x2B50; Use this one</b></td></tr>
+<tr><td><b>libaom</b></td><td>&#x1F534; Very Slow</td><td>&#x1F7E2; Best (marginal)</td>\
+<td>Small clips only</td></tr>
+<tr><td><b>rav1e</b></td><td>&#x1F7E1; Moderate</td><td>&#x1F7E1; Good</td>\
+<td>Niche/experimental</td></tr>
+</table>
+<p><b>TL;DR:</b> Use <b>SVT-AV1</b> unless you have a specific reason not to.</p>
+
+<hr>
 <h3>Recommendation</h3>
 <p><b>For best quality/size ratio:</b> AV1 (SVT-AV1) with preset 6-8, CRF 28-35.<br>
 <b>For fastest encoding with decent quality:</b> H.264 (x264) with preset medium, CRF 20-23.<br>
-<b>For good balance of speed, quality, and size:</b> H.265 (x265) with preset medium, CRF 24-28.</p>
+<b>For good balance of speed, quality, and size:</b> H.265 (x265) with preset medium, CRF 24-28.<br>
+<b>For cutting-edge compression (future-proofing):</b> H.266/VVC with preset medium, QP 30-35.</p>
 """
 
 
