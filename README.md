@@ -1,7 +1,7 @@
 # Video Codec Converter (VCC)
 
 <p align="center">
-  <img src="icon.png" alt="VCC Logo" width="128">
+  <img src="icon.png" alt="VCC Logo" width="256">
 </p>
 
 A desktop GUI application for batch video transcoding using **FFmpeg**. VCC provides a user-friendly interface to convert video files between popular codecs with full control over encoding parameters.
