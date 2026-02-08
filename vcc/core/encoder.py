@@ -76,6 +76,8 @@ class EncoderWorker(QThread):
         pix_fmt: str,
         audio_codec: str = "copy",
         subtitle_codec: str = "copy",
+        fps: str = "",
+        bitrate: str = "",
         overwrite: bool = False,
         parent=None,
     ):
@@ -89,6 +91,8 @@ class EncoderWorker(QThread):
         self.pix_fmt = pix_fmt
         self.audio_codec = audio_codec
         self.subtitle_codec = subtitle_codec
+        self.fps = fps          # e.g. "24", "30", "60", or "" for default
+        self.bitrate = bitrate  # e.g. "1M", "5M", or "" for default
         self.overwrite = overwrite
         self._cancelled = False
         self._ffmpeg_path = find_ffmpeg()
@@ -117,6 +121,14 @@ class EncoderWorker(QThread):
             "-c:v", self.codec,
         ]
 
+        # Frame rate
+        if self.fps and self.fps.strip():
+            args.extend(["-r", self.fps.strip()])
+
+        # Total video bitrate
+        if self.bitrate and self.bitrate.strip():
+            args.extend(["-b:v", self.bitrate.strip()])
+
         # Add codec-specific params (skip empty tune etc.)
         for key, value in self.codec_params.items():
             if value is not None and str(value).strip():
@@ -144,6 +156,11 @@ class EncoderWorker(QThread):
             if value is not None and str(value).strip():
                 param_parts.append(f"{key}{value}")
 
+        if self.fps and self.fps.strip():
+            param_parts.append(f"{self.fps.strip()}fps")
+        if self.bitrate and self.bitrate.strip():
+            param_parts.append(f"br{self.bitrate.strip()}")
+
         param_str = ".".join(param_parts) if param_parts else ""
         if param_str:
             name = f"{base}.{label}.{self.codec}.{param_str}.mkv"
@@ -154,7 +171,12 @@ class EncoderWorker(QThread):
 
     def run(self):
         total = len(self.files)
-        os.makedirs(self.output_dir, exist_ok=True)
+        try:
+            os.makedirs(self.output_dir, exist_ok=True)
+        except Exception as e:
+            self.encoding_error.emit(f"Cannot create output directory: {e}")
+            self.encoding_done.emit()
+            return
 
         for idx, src in enumerate(self.files, 1):
             if self._cancelled:
@@ -208,6 +230,7 @@ class EncoderWorker(QThread):
                 self.encoding_error.emit(
                     "ffmpeg not found! Please install FFmpeg and ensure ffmpeg.exe is in your system PATH."
                 )
+                self.encoding_done.emit()
                 return
             except Exception as e:
                 self.log_output.emit(f"\n[ERROR] {e}\n")

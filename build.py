@@ -11,12 +11,14 @@ import os
 def main():
     script_dir = os.path.dirname(os.path.abspath(__file__))
     run_py = os.path.join(script_dir, "run.py")
+    icon_path = os.path.join(script_dir, "icon.ico")
 
     cmd = [
         sys.executable, "-m", "PyInstaller",
         "--onefile",
         "--windowed",
         "--name", "VideoCodecConverter",
+        "--icon", icon_path,
         "--add-data", f"vcc;vcc",
         "--noconfirm",
         "--clean",

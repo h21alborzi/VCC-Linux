@@ -5,7 +5,7 @@ Main window for Video Codec Converter (VCC).
 import os
 from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QScrollArea,
-    QLabel, QPushButton, QComboBox, QSpinBox, QLineEdit,
+    QLabel, QPushButton, QComboBox, QSpinBox, QDoubleSpinBox, QLineEdit,
     QGroupBox, QFileDialog, QMessageBox, QMenuBar, QMenu,
     QProgressBar, QSplitter, QListWidget, QAbstractItemView,
     QToolButton, QSizePolicy, QCheckBox, QApplication, QListWidgetItem,
@@ -19,7 +19,7 @@ from vcc.core.encoder import EncoderWorker
 from vcc.ui.terminal_widget import TerminalWidget
 from vcc.ui.help_dialogs import (
     CodecHelpDialog, PixelFormatHelpDialog, AudioHelpDialog,
-    ResolutionHelpDialog, AboutDialog,
+    ResolutionHelpDialog, FPSHelpDialog, BitrateHelpDialog, AboutDialog,
 )
 
 
@@ -29,6 +29,19 @@ from vcc.ui.help_dialogs import (
 # ---------------------------------------------------------------------------
 class NoScrollSpinBox(QSpinBox):
     """QSpinBox that ignores wheel events unless it has focus."""
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+
+    def wheelEvent(self, event):
+        if self.hasFocus():
+            super().wheelEvent(event)
+        else:
+            event.ignore()
+
+
+class NoScrollDoubleSpinBox(QDoubleSpinBox):
+    """QDoubleSpinBox that ignores wheel events unless it has focus."""
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
@@ -231,6 +244,10 @@ class MainWindow(QMainWindow):
         help_menu.addAction(self._act_help_audio)
         self._act_help_resolution = QAction("Resolution Guide...", self)
         help_menu.addAction(self._act_help_resolution)
+        self._act_help_fps = QAction("Frame Rate (FPS) Guide...", self)
+        help_menu.addAction(self._act_help_fps)
+        self._act_help_bitrate = QAction("Video Bitrate Guide...", self)
+        help_menu.addAction(self._act_help_bitrate)
         help_menu.addSeparator()
         self._act_about = QAction("About VCC...", self)
         help_menu.addAction(self._act_about)
@@ -472,6 +489,93 @@ class MainWindow(QMainWindow):
         row_audio.addStretch()
         enc_vlayout.addLayout(row_audio)
 
+        # Row 4: FPS
+        row_fps = QHBoxLayout()
+        lbl_fps = QLabel("Frame Rate:")
+        lbl_fps.setFixedWidth(100)
+        row_fps.addWidget(lbl_fps)
+        self._cmb_fps = NoScrollComboBox()
+        self._cmb_fps.setFixedWidth(180)
+        self._fps_presets = [
+            ("Default (keep original)", ""),
+            ("12 fps",      "12"),
+            ("15 fps",      "15"),
+            ("18 fps",      "18"),
+            ("20 fps",      "20"),
+            ("23.976 fps",  "23.976"),
+            ("24 fps",      "24"),
+            ("25 fps (PAL)","25"),
+            ("29.97 fps",   "29.97"),
+            ("30 fps",      "30"),
+            ("50 fps",      "50"),
+            ("60 fps",      "60"),
+            ("Custom",      "__custom__"),
+        ]
+        for name, val in self._fps_presets:
+            self._cmb_fps.addItem(name, val)
+        self._cmb_fps.setCurrentIndex(0)
+        row_fps.addWidget(self._cmb_fps)
+        row_fps.addSpacing(8)
+        self._spn_custom_fps = NoScrollDoubleSpinBox()
+        self._spn_custom_fps.setRange(1.0, 300.0)
+        self._spn_custom_fps.setDecimals(3)
+        self._spn_custom_fps.setValue(30.0)
+        self._spn_custom_fps.setSuffix(" fps")
+        self._spn_custom_fps.setFixedWidth(120)
+        self._spn_custom_fps.setEnabled(False)
+        self._spn_custom_fps.setToolTip("Enter a custom frame rate value (1–300).")
+        row_fps.addWidget(self._spn_custom_fps)
+        row_fps.addSpacing(8)
+        fps_help = make_help_button(
+            "Output frame rate (Frames Per Second).\n\n"
+            "Default = keep the original video frame rate.\n"
+            "Custom = enter any value between 1 and 300.\n"
+            "Lower FPS = smaller files, choppier motion.\n"
+            "Higher FPS = smoother motion, larger files.\n\n"
+            "See Help \u2192 Frame Rate (FPS) Guide for details."
+        )
+        row_fps.addWidget(fps_help)
+        row_fps.addStretch()
+        enc_vlayout.addLayout(row_fps)
+
+        # Row 5: Bitrate
+        row_bitrate = QHBoxLayout()
+        lbl_br = QLabel("Bitrate:")
+        lbl_br.setFixedWidth(100)
+        row_bitrate.addWidget(lbl_br)
+        self._cmb_bitrate = NoScrollComboBox()
+        self._cmb_bitrate.setFixedWidth(180)
+        self._bitrate_presets = [
+            ("Default (CRF mode)",  ""),
+            ("256K",   "256K"),
+            ("384K",   "384K"),
+            ("512K",   "512K"),
+            ("768K",   "768K"),
+            ("1M",     "1M"),
+            ("1.5M",   "1500K"),
+            ("2M",     "2M"),
+            ("5M",     "5M"),
+            ("10M",    "10M"),
+            ("15M",    "15M"),
+            ("20M",    "20M"),
+        ]
+        for name, val in self._bitrate_presets:
+            self._cmb_bitrate.addItem(name, val)
+        self._cmb_bitrate.setCurrentIndex(0)
+        row_bitrate.addWidget(self._cmb_bitrate)
+        row_bitrate.addSpacing(8)
+        br_help = make_help_button(
+            "Target video bitrate.\n\n"
+            "Default = use CRF / constant quality mode\n"
+            "(bitrate is auto-adjusted for consistent quality).\n\n"
+            "Selecting a specific bitrate switches to\n"
+            "target bitrate mode with predictable file sizes.\n\n"
+            "See Help \u2192 Video Bitrate Guide for details."
+        )
+        row_bitrate.addWidget(br_help)
+        row_bitrate.addStretch()
+        enc_vlayout.addLayout(row_bitrate)
+
         top_layout.addWidget(enc_group)
 
         # --- Codec-specific parameters (dynamic) ---
@@ -611,6 +715,8 @@ class MainWindow(QMainWindow):
         self._act_help_pixfmt.triggered.connect(lambda: PixelFormatHelpDialog(self).exec())
         self._act_help_audio.triggered.connect(lambda: AudioHelpDialog(self).exec())
         self._act_help_resolution.triggered.connect(lambda: ResolutionHelpDialog(self).exec())
+        self._act_help_fps.triggered.connect(lambda: FPSHelpDialog(self).exec())
+        self._act_help_bitrate.triggered.connect(lambda: BitrateHelpDialog(self).exec())
         self._act_about.triggered.connect(lambda: AboutDialog(self).exec())
 
         # Buttons
@@ -624,6 +730,9 @@ class MainWindow(QMainWindow):
 
         # Codec change -> rebuild params
         self._cmb_codec.currentIndexChanged.connect(self._on_codec_changed)
+
+        # FPS preset -> enable/disable custom spinbox
+        self._cmb_fps.currentIndexChanged.connect(self._on_fps_preset_changed)
 
         # Resolution preset -> set width/height
         self._cmb_resolution_preset.currentIndexChanged.connect(self._on_resolution_preset_changed)
@@ -713,6 +822,22 @@ class MainWindow(QMainWindow):
     # ------------------------------------------------------------------
     # Resolution preset helpers
     # ------------------------------------------------------------------
+    def _on_fps_preset_changed(self, index: int):
+        """Enable/disable the custom FPS spinbox based on preset selection."""
+        data = self._cmb_fps.currentData()
+        self._spn_custom_fps.setEnabled(data == "__custom__")
+
+    def _get_selected_fps(self) -> str:
+        """Return the FPS value to use: preset value or custom spinbox."""
+        data = self._cmb_fps.currentData()
+        if data == "__custom__":
+            val = self._spn_custom_fps.value()
+            # Format nicely: strip trailing zeros
+            if val == int(val):
+                return str(int(val))
+            return f"{val:.3f}".rstrip('0').rstrip('.')
+        return data or ""
+
     def _on_resolution_preset_changed(self, index: int):
         """When a resolution preset is selected, auto-fill Width/Height."""
         if index < 0 or index >= len(self._resolution_presets):
@@ -749,6 +874,10 @@ class MainWindow(QMainWindow):
             self._cmb_pixfmt.setCurrentIndex(pf_idx)
         self._cmb_audio.setCurrentText("copy")
         self._cmb_subtitle.setCurrentText("copy")
+        self._cmb_fps.setCurrentIndex(0)
+        self._spn_custom_fps.setValue(30.0)
+        self._spn_custom_fps.setEnabled(False)
+        self._cmb_bitrate.setCurrentIndex(0)
         self._chk_overwrite.setChecked(False)
         self._on_codec_changed()
         self.statusBar().showMessage("Settings reset to defaults")
@@ -802,6 +931,8 @@ class MainWindow(QMainWindow):
             pix_fmt=pix_fmt,
             audio_codec=self._cmb_audio.currentText().strip() or "copy",
             subtitle_codec=self._cmb_subtitle.currentText().strip() or "copy",
+            fps=self._get_selected_fps(),
+            bitrate=self._cmb_bitrate.currentData() or "",
             overwrite=self._chk_overwrite.isChecked(),
         )
 
