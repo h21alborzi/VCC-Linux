@@ -319,6 +319,221 @@ class BitrateHelpDialog(HelpDialog):
         super().__init__("Video Bitrate Guide", BITRATE_HELP_TEXT, parent)
 
 
+GPU_ENCODING_HELP_TEXT = """\
+<h2>GPU-Accelerated Encoding Guide</h2>
+
+<p>VCC can use your graphics card (GPU) for hardware-accelerated video encoding,
+which is typically <b>10&ndash;50&times; faster</b> than CPU-based software encoding
+with near-zero CPU usage.</p>
+
+<hr>
+
+<h3>How It Works</h3>
+<p>Modern GPUs contain a dedicated hardware encoder (a fixed-function ASIC) that is
+separate from the GPU's shader cores. This means encoding doesn't affect gaming or
+other GPU workloads, and your CPU is free for other tasks.</p>
+<p>VCC <b>auto-detects</b> your GPU's encoding capabilities at startup by running a
+real hardware test. Only encoders that actually work on your system appear in the
+Codec dropdown (marked with &#x1F3AE;).</p>
+
+<hr>
+
+<h3>Supported GPU Vendors &amp; Hardware Requirements</h3>
+<table border="1" cellpadding="6" cellspacing="0" style="border-collapse:collapse;">
+<tr><th>Vendor</th><th>Technology</th><th>H.264</th><th>H.265/HEVC</th><th>AV1</th></tr>
+<tr><td><b>NVIDIA</b></td><td>NVENC</td>
+    <td>GeForce GTX 600+<br>Kepler or newer</td>
+    <td>GeForce GTX 900+<br>Maxwell 2nd gen+</td>
+    <td>RTX 4000+ only<br>Ada Lovelace</td></tr>
+<tr><td><b>AMD</b></td><td>AMF (VCE/VCN)</td>
+    <td>HD 7000+ (GCN 1.0+)</td>
+    <td>R9 285+ (GCN 3.0+)</td>
+    <td>RX 7000+ (RDNA 3)</td></tr>
+<tr><td><b>Intel</b></td><td>Quick Sync (QSV)</td>
+    <td>2nd Gen+ (Sandy Bridge)</td>
+    <td>6th Gen+ (Skylake)</td>
+    <td>Arc A-series / 12th Gen+</td></tr>
+</table>
+<p><b>Note:</b> Your FFmpeg build must include the GPU encoder libraries. The &ldquo;full&rdquo;
+build from Gyan.dev or BtbN includes all of them.</p>
+
+<hr>
+
+<h3>GPU vs CPU Encoding &mdash; When to Use Which</h3>
+<table border="1" cellpadding="6" cellspacing="0" style="border-collapse:collapse;">
+<tr><th>Aspect</th><th>GPU Encoding</th><th>CPU Encoding</th></tr>
+<tr><td><b>Encoding Speed</b></td>
+    <td>&#x1F7E2; Very Fast (10&ndash;50&times; faster)</td>
+    <td>&#x1F534; Slow</td></tr>
+<tr><td><b>Quality per Bitrate</b></td>
+    <td>&#x1F7E1; Good (5&ndash;15% behind CPU at same bitrate)</td>
+    <td>&#x1F7E2; Best</td></tr>
+<tr><td><b>CPU Usage</b></td>
+    <td>&#x1F7E2; Near zero (GPU does the work)</td>
+    <td>&#x1F534; 100% (all cores)</td></tr>
+<tr><td><b>Power Efficiency</b></td>
+    <td>&#x1F7E2; Very efficient (dedicated ASIC)</td>
+    <td>&#x1F7E1; Higher power draw</td></tr>
+<tr><td><b>Availability</b></td>
+    <td>&#x1F7E1; Requires compatible GPU + drivers</td>
+    <td>&#x1F7E2; Always available</td></tr>
+</table>
+
+<h4>&#x2705; Use GPU encoding when:</h4>
+<ul>
+<li><b>Batch processing</b> &mdash; Many files where speed matters most.</li>
+<li><b>Quick previews</b> &mdash; Fast draft before a final CPU render.</li>
+<li><b>Streaming / recording</b> &mdash; Real-time encoding with minimal latency.</li>
+<li><b>Multitasking</b> &mdash; Keep your CPU free for other work.</li>
+<li><b>Large files (4K/8K)</b> &mdash; GPU encoding scales better with resolution.</li>
+</ul>
+
+<h4>&#x1F3AF; Use CPU encoding when:</h4>
+<ul>
+<li><b>Maximum quality</b> &mdash; CPU encoders achieve ~5&ndash;15% better quality/bitrate.</li>
+<li><b>Archival</b> &mdash; File size and quality matter more than speed.</li>
+<li><b>AV1 is needed</b> &mdash; SVT-AV1 (CPU) still provides the best AV1 quality.</li>
+<li><b>No compatible GPU</b> &mdash; CPU encoding is always available.</li>
+</ul>
+
+<hr>
+
+<h3>Detailed Parameters by Vendor</h3>
+
+<h4>&#x1F7E2; NVIDIA NVENC</h4>
+<p>Best GPU encoder quality since Turing (RTX 20-series). RTX 30/40-series NVENC
+approaches CPU encoder quality.</p>
+<table border="1" cellpadding="5" cellspacing="0" style="border-collapse:collapse;">
+<tr><th>Parameter</th><th>Range</th><th>Default</th><th>Recommended</th><th>Description</th></tr>
+<tr><td><b>Preset</b></td><td>p1 &ndash; p7</td><td>p4</td><td>p4 &ndash; p5</td>
+    <td><b>p1</b> = fastest encoding, lowest quality.<br>
+    <b>p7</b> = slowest encoding, best quality.<br>
+    <b>p4</b> is the sweet spot for most users.<br>
+    p6&ndash;p7 are good for archival.</td></tr>
+<tr><td><b>CQ (Quality)</b></td><td>0 &ndash; 51</td><td>28</td><td>24 &ndash; 30</td>
+    <td>Constant Quality &mdash; NVENC's equivalent of CRF.<br>
+    <b>0</b> = highest quality (near-lossless).<br>
+    <b>51</b> = lowest quality, smallest file.<br>
+    Visually transparent: ~20&ndash;25.</td></tr>
+</table>
+<p><b>Bit depth:</b></p>
+<ul>
+<li><b>H.264 NVENC:</b> 8-bit only. 10-bit pixel formats are hidden.</li>
+<li><b>H.265 NVENC:</b> 8-bit and 10-bit. Use <code>yuv420p10le</code> for best quality
+    (FFmpeg auto-converts to <code>p010le</code> internally).</li>
+<li><b>AV1 NVENC:</b> 8-bit and 10-bit. Requires RTX 4000+ (Ada Lovelace).</li>
+</ul>
+
+<h4>&#x1F534; AMD AMF</h4>
+<p>Quality improved significantly with RDNA 2+ (RX 6000+). AV1 encoding requires
+RDNA 3 (RX 7000+).</p>
+<table border="1" cellpadding="5" cellspacing="0" style="border-collapse:collapse;">
+<tr><th>Parameter</th><th>Range</th><th>Default</th><th>Recommended</th><th>Description</th></tr>
+<tr><td><b>Preset</b></td><td>speed / balanced / quality</td><td>balanced</td><td>balanced / quality</td>
+    <td><b>speed</b> = fastest, lowest quality.<br>
+    <b>balanced</b> = good trade-off.<br>
+    <b>quality</b> = best quality, slower.<br>
+    AV1 AMF also has <b>high_quality</b>.</td></tr>
+<tr><td><b>QP (Quality)</b></td><td>0 &ndash; 51</td><td>26&ndash;28</td><td>22 &ndash; 30</td>
+    <td>Quantization Parameter.<br>
+    <b>0</b> = highest quality.<br>
+    <b>51</b> = lowest quality.<br>
+    VCC automatically sets both QP_I and QP_P to the same value.</td></tr>
+</table>
+<p><b>Bit depth:</b> H.264 AMF = 8-bit only. H.265/AV1 AMF = 8-bit and 10-bit.</p>
+
+<h4>&#x1F535; Intel Quick Sync (QSV)</h4>
+<p>Available on Intel CPUs with integrated graphics. Quality varies by generation;
+11th Gen+ (Tiger Lake) and Arc GPUs offer competitive quality.</p>
+<table border="1" cellpadding="5" cellspacing="0" style="border-collapse:collapse;">
+<tr><th>Parameter</th><th>Range</th><th>Default</th><th>Recommended</th><th>Description</th></tr>
+<tr><td><b>Preset</b></td><td>veryfast &ndash; veryslow</td><td>medium</td><td>medium / slow</td>
+    <td>Same preset names as x264/x265.<br>
+    <b>veryfast</b> = fastest, lowest quality.<br>
+    <b>veryslow</b> = slowest, best quality.</td></tr>
+<tr><td><b>Global Quality</b></td><td>1 &ndash; 51</td><td>25&ndash;28</td><td>22 &ndash; 30</td>
+    <td>Intel's equivalent of CRF.<br>
+    <b>1</b> = highest quality.<br>
+    <b>51</b> = lowest quality.</td></tr>
+</table>
+<p><b>Bit depth:</b> H.264 QSV = 8-bit only. H.265/AV1 QSV = 8-bit and 10-bit.</p>
+<p><b>Note:</b> QSV requires Intel integrated graphics to be enabled in BIOS. On laptops
+with both Intel and NVIDIA GPUs, you can often use both NVENC and QSV.</p>
+
+<hr>
+
+<h3>Pixel Format Compatibility</h3>
+<p>VCC <b>automatically filters</b> the pixel format dropdown so you can only
+select formats your chosen encoder supports. Key rules:</p>
+<ul>
+<li><b>H.264 (all GPU vendors):</b> 8-bit only &mdash; 10-bit options are hidden.</li>
+<li><b>H.265 / AV1 (all GPU vendors):</b> 8-bit and 10-bit &mdash; use <code>yuv420p10le</code>
+    for best quality. FFmpeg transparently converts format names for you.</li>
+</ul>
+<p><b>For GPU encoding, <code>yuv420p</code> always works.</b> For H.265/AV1 GPU,
+<code>yuv420p10le</code> is recommended for reduced banding and better compression.</p>
+
+<hr>
+
+<h3>Bitrate Mode with GPU Encoders</h3>
+<p>GPU encoders support target bitrate mode just like CPU encoders. When a bitrate
+is set in VCC, the quality parameter (CQ/QP/Global Quality) is ignored and the
+encoder targets the specified bitrate instead. VCC automatically configures the
+rate control mode for each vendor:</p>
+<ul>
+<li><b>NVIDIA:</b> VBR (variable bitrate) with maxrate/bufsize matching the target.</li>
+<li><b>AMD:</b> VBR Peak with maxrate/bufsize.</li>
+<li><b>Intel:</b> Standard bitrate targeting.</li>
+</ul>
+
+<hr>
+
+<h3>Troubleshooting</h3>
+<table border="1" cellpadding="6" cellspacing="0" style="border-collapse:collapse;">
+<tr><th>Problem</th><th>Solution</th></tr>
+<tr><td>No GPU encoders in dropdown</td>
+    <td>Install the <b>full build</b> of FFmpeg (not &ldquo;essentials&rdquo;).
+    Update GPU drivers to the latest version.</td></tr>
+<tr><td>Encoding fails with GPU encoder</td>
+    <td>Update GPU drivers. Ensure your GPU model supports that codec
+    (e.g. AV1 NVENC requires RTX 4000+).</td></tr>
+<tr><td>NVENC &ldquo;too many sessions&rdquo;</td>
+    <td>Consumer NVIDIA GPUs allow 3&ndash;5 simultaneous NVENC sessions.
+    Close other encoding/streaming apps (OBS, Discord, etc.).</td></tr>
+<tr><td>QSV not detected</td>
+    <td>Enable Intel integrated graphics in BIOS. Install Intel
+    Media SDK / oneVPL drivers. Some desktop CPUs with &ldquo;F&rdquo;
+    suffix (e.g. i7-12700F) lack integrated graphics.</td></tr>
+<tr><td>Low quality output</td>
+    <td>Lower the CQ/QP value (e.g. 20&ndash;25) or increase bitrate.
+    Use a slower preset (p5&ndash;p7 for NVENC).</td></tr>
+<tr><td>Encoder detected but fails on specific file</td>
+    <td>Some source files use features the GPU encoder can't handle.
+    Try a different pixel format or fall back to CPU encoding.</td></tr>
+</table>
+
+<hr>
+
+<h3>Quick Recommendations</h3>
+<table border="1" cellpadding="6" cellspacing="0" style="border-collapse:collapse;">
+<tr><th>Goal</th><th>GPU Encoder</th><th>Settings</th></tr>
+<tr><td><b>Fastest possible</b></td><td>H.264 NVENC</td>
+    <td>Preset p1&ndash;p3, CQ 28&ndash;32, yuv420p</td></tr>
+<tr><td><b>Best GPU quality</b></td><td>HEVC NVENC</td>
+    <td>Preset p5&ndash;p7, CQ 22&ndash;26, yuv420p10le</td></tr>
+<tr><td><b>Fast + smaller files</b></td><td>HEVC NVENC</td>
+    <td>Preset p4, CQ 26&ndash;30, yuv420p10le</td></tr>
+<tr><td><b>Most compatible GPU output</b></td><td>H.264 NVENC/QSV</td>
+    <td>Preset p4/medium, CQ 24&ndash;28, yuv420p</td></tr>
+</table>
+"""
+
+
+class GPUEncodingHelpDialog(HelpDialog):
+    def __init__(self, parent=None):
+        super().__init__("GPU Encoding Guide", GPU_ENCODING_HELP_TEXT, parent)
+
+
 class AboutDialog(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -333,7 +548,7 @@ class AboutDialog(QDialog):
         browser.setHtml("""
         <div style="text-align:center;">
         <h2>Video Codec Converter (VCC)</h2>
-        <p>Version 1.0.2a</p>
+        <p>Version 1.1</p>
         <p>A graphical FFmpeg front-end for batch video transcoding.</p>
         <hr>
         <p style="color:#666;">Powered by FFmpeg<br>

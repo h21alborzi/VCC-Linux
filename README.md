@@ -9,20 +9,21 @@ A desktop GUI application for batch video transcoding using **FFmpeg**. VCC prov
 ![Platform](https://img.shields.io/badge/platform-Windows-blue)
 ![Python](https://img.shields.io/badge/python-3.12-green)
 ![License](https://img.shields.io/badge/license-MIT-brightgreen)
-![Release](https://img.shields.io/badge/release-v1.0.2a-orange)
+![Release](https://img.shields.io/badge/release-v1.1-orange)
 
 ---
 
 ## Features
 
 - **8 Video Codecs** — AV1 (SVT-AV1), H.264, H.265/HEVC, H.266/VVC, VP9, AV1 (libaom), MPEG-4, AV1 (rav1e)
+- **GPU Encoding** — Auto-detected NVIDIA NVENC, AMD AMF, and Intel QSV hardware encoders (10–50× faster)
 - **15 Pixel Formats** — yuv420p, yuv420p10le, yuv444p, and more
 - **Audio Control** — Copy, re-encode (AAC/Opus/MP3/FLAC/Vorbis), or remove audio
 - **Resolution Presets** — Quick presets for 360p through 8K, or set custom dimensions
 - **Subtitle Handling** — Copy subtitles or remove them
 - **Batch Processing** — Select multiple files or entire directories
 - **Embedded Terminal** — Live FFmpeg output displayed in the app
-- **Built-in Help** — Menu bar with Codec, Pixel Format, Audio, Resolution, FPS, and Bitrate guides
+- **Built-in Help** — Menu bar with Codec, Pixel Format, Audio, Resolution, FPS, Bitrate, and GPU Encoding guides
 - **Dark / Light Theme** — Toggle between dark and light mode via Settings menu (preference saved across sessions)
 - **Scroll-safe Controls** — Mouse wheel won't change values unless a control is focused
 - **Single EXE** — Standalone `.exe`, no Python installation required for end users
@@ -83,6 +84,8 @@ ffmpeg -version
 
 ## Supported Codecs
 
+### CPU Encoders
+
 | Codec | FFmpeg Encoder | Container | Use Case |
 |---|---|---|---|
 | AV1 (SVT-AV1) | `libsvtav1` | `.mkv` | Best quality/size ratio, modern |
@@ -93,6 +96,16 @@ ffmpeg -version
 | AV1 (libaom) | `libaom-av1` | `.mkv` | Reference AV1 encoder (slow) |
 | MPEG-4 | `mpeg4` | `.mkv` | Legacy compatibility |
 | AV1 (rav1e) | `librav1e` | `.mkv` | Rust-based AV1 encoder |
+
+### GPU Encoders (Auto-Detected)
+
+| Codec | NVIDIA (NVENC) | AMD (AMF) | Intel (QSV) |
+|---|---|---|---|
+| H.264 | `h264_nvenc` | `h264_amf` | `h264_qsv` |
+| H.265 / HEVC | `hevc_nvenc` | `hevc_amf` | `hevc_qsv` |
+| AV1 | `av1_nvenc` (RTX 40+) | `av1_amf` (RX 7000+) | `av1_qsv` (Arc+) |
+
+> GPU encoders are **auto-detected** at startup. Only encoders supported by your hardware and FFmpeg build will appear in the codec dropdown.
 
 ---
 
@@ -145,7 +158,8 @@ VCC/
 │   ├── core/
 │   │   ├── codecs.py           # Codec definitions and help text
 │   │   ├── pixel_formats.py    # Pixel format definitions
-│   │   └── encoder.py          # FFmpeg worker thread
+│   │   ├── encoder.py          # FFmpeg worker thread
+│   │   └── gpu_detect.py       # GPU encoder auto-detection
 │   └── ui/
 │       ├── main_window.py      # Main application window
 │       ├── terminal_widget.py  # Embedded terminal output
@@ -168,6 +182,8 @@ VCC/
 | "ffmpeg is not recognized" | Add FFmpeg's `bin` folder to your system PATH and restart the terminal |
 | Windows SmartScreen blocks EXE | Click "More info" → "Run anyway" |
 | Encoding fails with codec error | Ensure you have the **full build** of FFmpeg (not essentials) which includes all codec libraries |
+| No GPU encoders in dropdown | Update GPU drivers. Use the **full build** of FFmpeg. Verify your GPU supports the encoder. |
+| GPU encoding fails | Update GPU drivers. Check NVIDIA/AMD/Intel driver versions. Try a different GPU preset. |
 
 ---
 
@@ -179,6 +195,8 @@ MIT License — free for personal and commercial use.
 
 ## Version History
 
+- **v1.1** — GPU-accelerated encoding (NVIDIA NVENC, AMD AMF, Intel QSV) with parallel auto-detection, smart pixel format filtering per encoder, comprehensive help text with parameter tables, faster startup via parallel GPU probing
+- **v1.0.3** — Added GPU-accelerated encoding (NVIDIA NVENC, AMD AMF, Intel QSV) with auto-detection, GPU Encoding Guide in Help menu, hardware-accelerated decoding
 - **v1.0.2a** — Fixed encoding failure in target bitrate mode (SVT-AV1 VBR), fixed app crash after encoding completes, fixed dark theme white widgets, fixed arrow visibility in themed spinboxes & comboboxes, added dark/light theme toggle in Settings menu
 - **v1.0.2** — Added FPS control (11 presets + custom), video bitrate selector (256K–20M), app icon, fixed window closing during batch processing
 - **v1.0.1** — Added H.266/VVC codec, AV1 encoder comparison guide, FFmpeg 8.x support, auto-detection of FFmpeg in winget/common paths

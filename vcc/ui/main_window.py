@@ -14,12 +14,16 @@ from PyQt6.QtCore import Qt, QSize, QEvent, QSettings
 from PyQt6.QtGui import QAction, QFont, QIcon
 
 from vcc.core.codecs import CODECS
-from vcc.core.pixel_formats import PIXEL_FORMATS
+from vcc.core.pixel_formats import PIXEL_FORMATS, query_encoder_pix_fmts
 from vcc.core.encoder import EncoderWorker
+from vcc.core.gpu_detect import (
+    probe_available_gpu_encoders, get_gpu_encoder, is_gpu_encoder, GpuEncoder,
+)
 from vcc.ui.terminal_widget import TerminalWidget
 from vcc.ui.help_dialogs import (
     CodecHelpDialog, PixelFormatHelpDialog, AudioHelpDialog,
     ResolutionHelpDialog, FPSHelpDialog, BitrateHelpDialog, AboutDialog,
+    GPUEncodingHelpDialog,
 )
 from vcc.ui.themes import (
     LIGHT_THEME, DARK_THEME,
@@ -227,6 +231,8 @@ class MainWindow(QMainWindow):
         help_menu.addAction(self._act_help_fps)
         self._act_help_bitrate = QAction("Video Bitrate Guide...", self)
         help_menu.addAction(self._act_help_bitrate)
+        self._act_help_gpu = QAction("GPU Encoding Guide...", self)
+        help_menu.addAction(self._act_help_gpu)
         help_menu.addSeparator()
         self._act_about = QAction("About VCC...", self)
         help_menu.addAction(self._act_about)
@@ -376,8 +382,21 @@ class MainWindow(QMainWindow):
         self._cmb_codec = NoScrollComboBox()
         self._cmb_codec.setMinimumWidth(250)
         self._cmb_codec.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+
+        # CPU codecs
         for ffname, info in CODECS.items():
             self._cmb_codec.addItem(f"{info['display']}  ({ffname})", ffname)
+
+        # GPU codecs (auto-detected)
+        self._gpu_encoders = probe_available_gpu_encoders()
+        if self._gpu_encoders:
+            self._cmb_codec.insertSeparator(self._cmb_codec.count())
+            for gpu_enc in self._gpu_encoders:
+                self._cmb_codec.addItem(
+                    f"\U0001F3AE {gpu_enc.display_name}  ({gpu_enc.name})",
+                    gpu_enc.name,
+                )
+
         idx = self._cmb_codec.findData("libsvtav1")
         if idx >= 0:
             self._cmb_codec.setCurrentIndex(idx)
@@ -645,6 +664,7 @@ class MainWindow(QMainWindow):
         self._act_help_resolution.triggered.connect(lambda: ResolutionHelpDialog(self).exec())
         self._act_help_fps.triggered.connect(lambda: FPSHelpDialog(self).exec())
         self._act_help_bitrate.triggered.connect(lambda: BitrateHelpDialog(self).exec())
+        self._act_help_gpu.triggered.connect(lambda: GPUEncodingHelpDialog(self).exec())
         self._act_about.triggered.connect(lambda: AboutDialog(self).exec())
 
         # Buttons
@@ -737,15 +757,110 @@ class MainWindow(QMainWindow):
         self._codec_param_widgets.clear()
 
         codec_key = self._cmb_codec.currentData()
-        if codec_key and codec_key in CODECS:
+        if not codec_key:
+            self._codec_params_layout.addStretch()
+            return
+
+        gpu_enc = get_gpu_encoder(codec_key)
+        if gpu_enc:
+            # ── GPU encoder: build preset + quality widgets ──
+            # Preset widget
+            preset_def = {
+                "label": "Preset",
+                "type": gpu_enc.preset_type,
+                "tooltip": gpu_enc.preset_tooltip,
+            }
+            if gpu_enc.preset_type == "choice":
+                preset_def["choices"] = gpu_enc.preset_values
+                preset_def["default"] = gpu_enc.preset_default
+            else:
+                preset_def["default"] = gpu_enc.preset_default
+                preset_def["min"] = 0
+                preset_def["max"] = 100
+            pw = CodecParamWidget(gpu_enc.preset_key, preset_def)
+            self._codec_params_layout.addWidget(pw)
+            self._codec_param_widgets.append(pw)
+
+            # Quality widget
+            quality_def = {
+                "label": gpu_enc.quality_label,
+                "type": "int",
+                "default": gpu_enc.quality_default,
+                "min": gpu_enc.quality_min,
+                "max": gpu_enc.quality_max,
+                "tooltip": gpu_enc.quality_tooltip,
+            }
+            qw = CodecParamWidget(gpu_enc.quality_param, quality_def)
+            self._codec_params_layout.addWidget(qw)
+            self._codec_param_widgets.append(qw)
+
+            # GPU indicator label
+            vendor_icons = {"NVIDIA": "\U0001F7E2", "AMD": "\U0001F534", "Intel": "\U0001F535"}
+            icon = vendor_icons.get(gpu_enc.vendor, "\U0001F3AE")
+            lbl = QLabel(f"{icon} GPU Encoding ({gpu_enc.vendor}) — Near-zero CPU usage, 10–50× faster")
+            lbl.setStyleSheet("font-style: italic; padding: 4px 0;")
+            self._codec_params_layout.addWidget(lbl)
+            self._codec_param_widgets.append(lbl)
+        elif codec_key in CODECS:
+            # ── CPU encoder: use CODECS dict ──
             params = CODECS[codec_key].get("params", {})
             for pkey, pdef in params.items():
                 widget = CodecParamWidget(pkey, pdef)
                 self._codec_params_layout.addWidget(widget)
                 self._codec_param_widgets.append(widget)
 
+        # Filter pixel format dropdown for the selected encoder
+        self._update_pixfmt_combo(codec_key)
+
         # Add stretch at end
         self._codec_params_layout.addStretch()
+
+    def _update_pixfmt_combo(self, encoder_name: str):
+        """Filter pixel format dropdown to only show formats the encoder supports.
+
+        GPU encoders: filter by bit-depth capability.  FFmpeg auto-converts
+        pixel format names (e.g. yuv420p10le → p010le) so the exact native
+        format list is not the right filter — only bit depth matters.
+
+        CPU encoders: use FFmpeg's reported "Supported pixel formats" list,
+        which accurately reflects what the software encoder can handle.
+        """
+        gpu_enc = get_gpu_encoder(encoder_name)
+
+        if gpu_enc:
+            # GPU: filter by max bit depth (H.264 = 8-bit only, HEVC/AV1 = 10-bit)
+            max_depth = gpu_enc.max_bit_depth
+            accept = lambda pf: pf[2] <= max_depth  # pf[2] = bit_depth
+        else:
+            # CPU: use FFmpeg's exact supported format list
+            supported = query_encoder_pix_fmts(encoder_name)
+            if supported is not None:
+                accept = lambda pf: pf[0] in supported
+            else:
+                accept = lambda pf: True  # query failed → show all
+
+        # Remember current selection so we can try to restore it
+        previous = self._cmb_pixfmt.currentData()
+
+        self._cmb_pixfmt.blockSignals(True)
+        self._cmb_pixfmt.clear()
+
+        for pf in PIXEL_FORMATS:
+            if accept(pf):
+                ffname, display = pf[0], pf[1]
+                self._cmb_pixfmt.addItem(f"{ffname}  —  {display}", ffname)
+
+        # Try to restore previous selection
+        idx = self._cmb_pixfmt.findData(previous)
+        if idx >= 0:
+            self._cmb_pixfmt.setCurrentIndex(idx)
+        else:
+            # Previous format not available — pick the best default
+            # Prefer yuv420p (universal) then first item
+            fallback = self._cmb_pixfmt.findData("yuv420p")
+            self._cmb_pixfmt.setCurrentIndex(fallback if fallback >= 0 else 0)
+
+        self._cmb_pixfmt.blockSignals(False)
 
     # ------------------------------------------------------------------
     # Resolution preset helpers
@@ -839,7 +954,8 @@ class MainWindow(QMainWindow):
         # Gather codec params
         codec_params = {}
         for pw in self._codec_param_widgets:
-            codec_params[pw.key] = pw.get_value()
+            if isinstance(pw, CodecParamWidget):
+                codec_params[pw.key] = pw.get_value()
 
         codec_key = self._cmb_codec.currentData()
         pix_fmt = self._get_selected_pixfmt()

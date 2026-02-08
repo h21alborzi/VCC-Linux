@@ -2,6 +2,12 @@
 Pixel format definitions and help text for VCC.
 """
 
+import glob
+import os
+import re
+import shutil
+import subprocess
+
 PIXEL_FORMATS = [
     # (ffmpeg_name, display_label, bit_depth, chroma_subsampling, has_alpha, description)
     ("yuv420p",      "YUV 4:2:0  8-bit",         8,  "4:2:0", False, "Standard 8-bit. Most compatible. Good for general video."),
@@ -92,11 +98,121 @@ H.264 and H.265 do <b>not</b>.</p>
 
 <hr>
 
+<h3>Codec Compatibility</h3>
+<p>VCC <b>automatically filters</b> the pixel format dropdown based on the selected codec.
+You will only see formats that the encoder actually supports, so you cannot pick an
+incompatible combination.</p>
+
+<table border="1" cellpadding="5" cellspacing="0" style="border-collapse:collapse;">
+<tr><th>Codec</th><th>8-bit</th><th>10-bit</th><th>Best Choice</th></tr>
+<tr><td><b>AV1 (SVT-AV1)</b></td><td>yuv420p</td><td>yuv420p10le</td>
+    <td>&#x2B50; yuv420p10le (10-bit helps AV1 compress better)</td></tr>
+<tr><td><b>H.264 (x264)</b></td><td>yuv420p + many</td><td>yuv420p10le + more</td>
+    <td>yuv420p for compatibility, yuv420p10le for quality</td></tr>
+<tr><td><b>H.265 (x265)</b></td><td>yuv420p + many</td><td>yuv420p10le + many</td>
+    <td>&#x2B50; yuv420p10le (10-bit recommended for HEVC)</td></tr>
+<tr><td><b>H.266 (VVC)</b></td><td>&mdash;</td><td>yuv420p10le only</td>
+    <td>yuv420p10le (only option)</td></tr>
+<tr><td><b>VP9</b></td><td>yuv420p + many</td><td>yuv420p10le + more</td>
+    <td>yuv420p for web, yuv420p10le for quality</td></tr>
+</table>
+
+<h4>GPU Encoder Pixel Formats</h4>
+<p>GPU encoders have simpler pixel format support. FFmpeg <b>auto-converts</b> between
+format names transparently (e.g. <code>yuv420p10le</code> is internally mapped to
+<code>p010le</code> for hardware encoders), so you can pick any shown format normally.</p>
+
+<table border="1" cellpadding="5" cellspacing="0" style="border-collapse:collapse;">
+<tr><th>GPU Encoder</th><th>Bit Depth</th><th>Best Choice</th></tr>
+<tr><td><b>H.264 NVENC / AMF / QSV</b></td><td><b>8-bit only</b></td>
+    <td>yuv420p or nv12</td></tr>
+<tr><td><b>H.265 NVENC / AMF / QSV</b></td><td>8-bit and 10-bit</td>
+    <td>&#x2B50; yuv420p10le (auto-converted to p010le)</td></tr>
+<tr><td><b>AV1 NVENC / AMF / QSV</b></td><td>8-bit and 10-bit</td>
+    <td>&#x2B50; yuv420p10le</td></tr>
+</table>
+
+<p><b>Important:</b> H.264 (all vendors) does <b>not</b> support 10-bit encoding.
+VCC hides 10-bit formats when an H.264 GPU encoder is selected.</p>
+
+<hr>
+
 <h3>Recommendations</h3>
 <p><b>General consumer video:</b> <code>yuv420p</code> (8-bit) or <code>yuv420p10le</code> (10-bit).<br>
 <b>Best quality/size for modern codecs (AV1, HEVC):</b> <code>yuv420p10le</code> &mdash; 10-bit \
 actually helps the encoder produce smaller files with fewer artifacts.<br>
 <b>Maximum compatibility:</b> <code>yuv420p</code> (works everywhere).<br>
 <b>Professional / broadcast:</b> <code>yuv422p10le</code>.<br>
-<b>Need transparency:</b> <code>yuva420p</code> with VP9 or AV1.</p>
+<b>Need transparency:</b> <code>yuva420p</code> with VP9 or AV1.<br>
+<b>GPU encoding:</b> For H.264 GPU use <code>yuv420p</code>; for H.265/AV1 GPU use <code>yuv420p10le</code>.</p>
 """
+
+
+# ---------------------------------------------------------------------------
+# Query FFmpeg for per-encoder pixel format support
+# ---------------------------------------------------------------------------
+
+def _find_ffmpeg() -> str | None:
+    """Locate ffmpeg executable (lightweight duplicate to avoid circular imports)."""
+    path = shutil.which("ffmpeg")
+    if path:
+        return path
+    winget_links = os.path.expandvars(
+        r"%LOCALAPPDATA%\Microsoft\WinGet\Links\ffmpeg.exe"
+    )
+    if os.path.isfile(winget_links):
+        return winget_links
+    winget_pkgs = os.path.expandvars(
+        r"%LOCALAPPDATA%\Microsoft\WinGet\Packages"
+    )
+    for pattern in [
+        os.path.join(winget_pkgs, "Gyan.FFmpeg*", "ffmpeg-*", "bin", "ffmpeg.exe"),
+        os.path.join(winget_pkgs, "Gyan.FFmpeg*", "ffmpeg.exe"),
+    ]:
+        matches = glob.glob(pattern)
+        if matches:
+            return matches[0]
+    for candidate in [
+        r"C:\ffmpeg\bin\ffmpeg.exe",
+        r"C:\Program Files\ffmpeg\bin\ffmpeg.exe",
+        r"C:\Program Files (x86)\ffmpeg\bin\ffmpeg.exe",
+    ]:
+        if os.path.isfile(candidate):
+            return candidate
+    return None
+
+
+_pix_fmt_cache: dict[str, list[str] | None] = {}
+
+
+def query_encoder_pix_fmts(encoder_name: str) -> list[str] | None:
+    """Query FFmpeg for the pixel formats supported by *encoder_name*.
+
+    Returns a list of FFmpeg pix_fmt names that the encoder accepts,
+    or ``None`` if the query fails (in which case the caller should
+    show all formats).  Results are cached.
+    """
+    if encoder_name in _pix_fmt_cache:
+        return _pix_fmt_cache[encoder_name]
+
+    ffmpeg = _find_ffmpeg()
+    if not ffmpeg:
+        _pix_fmt_cache[encoder_name] = None
+        return None
+
+    try:
+        result = subprocess.run(
+            [ffmpeg, "-hide_banner", "-h", f"encoder={encoder_name}"],
+            capture_output=True, text=True, timeout=10,
+            creationflags=0x08000000 if os.name == "nt" else 0,
+        )
+        m = re.search(r"Supported pixel formats:\s*(.+)", result.stdout)
+        if m:
+            fmts = m.group(1).split()
+            _pix_fmt_cache[encoder_name] = fmts
+            return fmts
+    except Exception:
+        pass
+
+    _pix_fmt_cache[encoder_name] = None
+    return None

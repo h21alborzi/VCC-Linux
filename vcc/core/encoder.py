@@ -7,6 +7,7 @@ import glob
 import shutil
 import subprocess
 from PyQt6.QtCore import QThread, pyqtSignal
+from vcc.core.gpu_detect import get_gpu_encoder, is_gpu_encoder
 
 
 def find_ffmpeg() -> str:
@@ -96,6 +97,7 @@ class EncoderWorker(QThread):
         self.overwrite = overwrite
         self._cancelled = False
         self._ffmpeg_path = find_ffmpeg()
+        self._gpu_enc = get_gpu_encoder(self.codec) if is_gpu_encoder(self.codec) else None
 
     def cancel(self):
         self._cancelled = True
@@ -107,11 +109,19 @@ class EncoderWorker(QThread):
         ow_flag = "-y" if self.overwrite else "-n"
         scale_filter = f"scale={self.width}:{self.height}"
         has_bitrate = bool(self.bitrate and self.bitrate.strip())
+        gpu = self._gpu_enc
 
         args = [
             self._ffmpeg_path,
             "-hide_banner",
             ow_flag,
+        ]
+
+        # GPU hardware-accelerated decoding (optional, speeds up decode)
+        if gpu and gpu.hwaccel_flag:
+            args.extend(["-hwaccel", gpu.hwaccel_flag])
+
+        args.extend([
             "-i", src,
             "-map_metadata", "0",
             "-map_chapters", "0",
@@ -120,7 +130,7 @@ class EncoderWorker(QThread):
             "-map", "0:s?",
             "-vf", scale_filter,
             "-c:v", self.codec,
-        ]
+        ])
 
         # Frame rate
         if self.fps and self.fps.strip():
@@ -130,20 +140,25 @@ class EncoderWorker(QThread):
         if has_bitrate:
             args.extend(["-b:v", self.bitrate.strip()])
 
-        # Add codec-specific params (skip empty tune etc.)
-        # When using target bitrate mode, skip CRF/quality params
-        # as they conflict with bitrate-based rate control.
-        quality_keys = {"crf", "qp", "q:v"}
-        for key, value in self.codec_params.items():
-            if value is not None and str(value).strip():
-                if key in quality_keys and has_bitrate:
-                    continue  # skip quality param in bitrate mode
-                args.extend([f"-{key}", str(value)])
+        if gpu:
+            # ── GPU encoder parameters ──
+            self._apply_gpu_params(args, gpu, has_bitrate)
+        else:
+            # ── CPU encoder parameters ──
+            # Add codec-specific params (skip empty tune etc.)
+            # When using target bitrate mode, skip CRF/quality params
+            # as they conflict with bitrate-based rate control.
+            quality_keys = {"crf", "qp", "q:v"}
+            for key, value in self.codec_params.items():
+                if value is not None and str(value).strip():
+                    if key in quality_keys and has_bitrate:
+                        continue  # skip quality param in bitrate mode
+                    args.extend([f"-{key}", str(value)])
 
-        # When using bitrate with SVT-AV1, set rate control to VBR (rc=1)
-        # SVT-AV1 defaults to CQ mode (rc=0) which rejects -b:v
-        if has_bitrate and self.codec == "libsvtav1":
-            args.extend(["-svtav1-params", "rc=1"])
+            # When using bitrate with SVT-AV1, set rate control to VBR (rc=1)
+            # SVT-AV1 defaults to CQ mode (rc=0) which rejects -b:v
+            if has_bitrate and self.codec == "libsvtav1":
+                args.extend(["-svtav1-params", "rc=1"])
 
         if self.pix_fmt and self.pix_fmt.strip():
             args.extend(["-pix_fmt", self.pix_fmt])
@@ -155,6 +170,38 @@ class EncoderWorker(QThread):
         ])
 
         return args
+
+    def _apply_gpu_params(
+        self, args: list[str], gpu, has_bitrate: bool
+    ) -> None:
+        """Append GPU-specific encoding parameters to *args*."""
+        # Preset
+        preset_val = self.codec_params.get(gpu.preset_key, "")
+        if preset_val and str(preset_val).strip():
+            args.extend([f"-{gpu.preset_key}", str(preset_val)])
+
+        if has_bitrate:
+            # In bitrate mode, add rate control buffers
+            bv = self.bitrate.strip()
+            args.extend(["-maxrate", bv, "-bufsize", bv])
+            # NVENC: set rc mode to vbr
+            if gpu.vendor == "NVIDIA":
+                args.extend(["-rc", "vbr"])
+            elif gpu.vendor == "AMD":
+                args.extend(["-rc", "vbr_peak"])
+        else:
+            # Quality mode — apply the quality parameter
+            q_val = self.codec_params.get(gpu.quality_param, "")
+            if q_val and str(q_val).strip():
+                args.extend([f"-{gpu.quality_param}", str(q_val)])
+                # NVENC needs rc=constqp to honour CQ
+                if gpu.vendor == "NVIDIA":
+                    args.extend(["-rc", "constqp"])
+            # AMF: also set qp_p to match qp_i
+            if gpu.vendor == "AMD" and gpu.quality_param == "qp_i":
+                qp_val = self.codec_params.get("qp_i", "")
+                if qp_val and str(qp_val).strip():
+                    args.extend(["-qp_p", str(qp_val)])
 
     def make_output_name(self, src_path: str) -> str:
         """Generate output filename like: basename.WxH.codec.paramN.mkv"""
@@ -173,10 +220,17 @@ class EncoderWorker(QThread):
             param_parts.append(f"br{self.bitrate.strip()}")
 
         param_str = ".".join(param_parts) if param_parts else ""
+        # Use correct container for the codec
+        ext = "mkv"  # default
+        if self._gpu_enc:
+            ext = self._gpu_enc.container
+        elif self.codec in ("libvpx-vp9",):
+            ext = "webm"
+
         if param_str:
-            name = f"{base}.{label}.{self.codec}.{param_str}.mkv"
+            name = f"{base}.{label}.{self.codec}.{param_str}.{ext}"
         else:
-            name = f"{base}.{label}.{self.codec}.mkv"
+            name = f"{base}.{label}.{self.codec}.{ext}"
 
         return os.path.join(self.output_dir, name)
 
