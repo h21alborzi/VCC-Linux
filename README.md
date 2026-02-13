@@ -57,7 +57,7 @@ Verify:
 ```
 ffmpeg -version
 ```
-If you have the lower version of the ffmpeg use:
+If you already have the lower version of the ffmpeg use:
 ```
 winget upgrade ffmpeg
 ```
