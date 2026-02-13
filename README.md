@@ -57,6 +57,10 @@ Verify:
 ```
 ffmpeg -version
 ```
+If you have the lower version of the ffmpeg use:
+```
+winget upgrade ffmpeg
+```
 
 **Option B: Manual install**
 1. Download the latest **full_build** from [gyan.dev/ffmpeg/builds](https://www.gyan.dev/ffmpeg/builds/)
