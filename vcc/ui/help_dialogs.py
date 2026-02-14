@@ -657,6 +657,144 @@ class OutputFormatHelpDialog(HelpDialog):
         super().__init__("Output Format Guide", OUTPUT_FORMAT_HELP_TEXT, parent)
 
 
+# ---------------------------------------------------------------------------
+# Film Grain Help
+# ---------------------------------------------------------------------------
+FILM_GRAIN_HELP_TEXT = """\
+<h2>Film Grain Synthesis Guide</h2>
+
+<p><b>Film Grain Synthesis</b> is an advanced encoding technique where the encoder
+analyses the natural grain/noise in the source video, removes it before compression,
+and stores a compact &ldquo;grain model&rdquo; in the bitstream so the decoder can
+re-synthesise (add back) the grain during playback.</p>
+
+<hr>
+
+<h3>How It Works</h3>
+<ol>
+<li>The encoder detects and removes film grain from the source frames.</li>
+<li>The &ldquo;clean&rdquo; frames compress much more efficiently (smaller file).</li>
+<li>A grain synthesis model is stored alongside the video data.</li>
+<li>During playback, the decoder re-applies the grain pattern.</li>
+</ol>
+<p>The result is a <b>significantly smaller file</b> that still looks like it has
+the original film grain when played back.</p>
+
+<hr>
+
+<h3>Supported Codecs</h3>
+<table border="1" cellpadding="6" cellspacing="0" style="border-collapse:collapse;">
+<tr><th>Codec</th><th>Parameter</th><th>Range</th><th>Passed As</th></tr>
+<tr><td><b>SVT-AV1</b></td><td>film-grain</td><td>0&ndash;50</td>
+    <td><code>-svtav1-params film-grain=N</code></td></tr>
+</table>
+<p><b>Note:</b> Film grain synthesis is currently only supported by SVT-AV1 in VCC.
+For other codecs, use the <b>tune=grain</b> option (x264/x265) to preserve existing
+grain without synthesis.</p>
+
+<hr>
+
+<h3>Recommended Values</h3>
+<table border="1" cellpadding="6" cellspacing="0" style="border-collapse:collapse;">
+<tr><th>Value</th><th>Effect</th><th>Use Case</th></tr>
+<tr><td><b>0</b></td><td>Disabled (no grain synthesis)</td><td>Default &mdash; clean video or when grain isn&rsquo;t important</td></tr>
+<tr><td><b>1&ndash;8</b></td><td>Subtle grain</td><td>Lightly grainy sources, digital camera footage</td></tr>
+<tr><td><b>8&ndash;16</b></td><td>Moderate grain</td><td>Film-like content with visible grain</td></tr>
+<tr><td><b>16&ndash;30</b></td><td>Heavy grain</td><td>Very grainy film scans, old movies</td></tr>
+<tr><td><b>30&ndash;50</b></td><td>Extreme grain</td><td>Heavily noisy sources (rarely needed)</td></tr>
+</table>
+
+<hr>
+
+<h3>Tips</h3>
+<ul>
+<li><b>Start with 8</b> for most film content &mdash; it&rsquo;s a good starting point.</li>
+<li>Increasing the value <b>reduces file size</b> but changes the grain character.</li>
+<li>Film grain synthesis works best at <b>CRF 28&ndash;35</b> where the compression
+    savings are most noticeable.</li>
+<li>At very low CRF (high quality), the difference is minimal because the encoder
+    already has enough bits to encode the grain directly.</li>
+<li>This is <b>not the same as adding grain to clean video</b> &mdash; it only works
+    well when the source already has grain/noise.</li>
+</ul>
+"""
+
+
+class FilmGrainHelpDialog(HelpDialog):
+    def __init__(self, parent=None):
+        super().__init__("Film Grain Synthesis Guide", FILM_GRAIN_HELP_TEXT, parent)
+
+
+# ---------------------------------------------------------------------------
+# Sharpness Help
+# ---------------------------------------------------------------------------
+SHARPNESS_HELP_TEXT = """\
+<h2>Sharpness Guide</h2>
+
+<p>The <b>sharpness</b> parameter controls how aggressively the in-loop deblocking
+filter smooths block boundaries during encoding. Higher values reduce filtering,
+preserving more fine detail at the cost of potentially more visible blocking
+artefacts.</p>
+
+<hr>
+
+<h3>Supported Codecs</h3>
+<table border="1" cellpadding="6" cellspacing="0" style="border-collapse:collapse;">
+<tr><th>Codec</th><th>Parameter</th><th>Range</th><th>Passed As</th></tr>
+<tr><td><b>SVT-AV1</b></td><td>sharpness</td><td>0&ndash;7</td>
+    <td><code>-svtav1-params sharpness=N</code></td></tr>
+<tr><td><b>VP9</b></td><td>sharpness</td><td>0&ndash;7</td>
+    <td><code>-sharpness N</code></td></tr>
+</table>
+
+<hr>
+
+<h3>Values Explained</h3>
+<table border="1" cellpadding="6" cellspacing="0" style="border-collapse:collapse;">
+<tr><th>Value</th><th>Filtering</th><th>Effect</th></tr>
+<tr><td><b>0</b></td><td>Maximum filtering (default)</td>
+    <td>Smoothest output, fewest blocking artefacts, may soften fine textures</td></tr>
+<tr><td><b>1&ndash;3</b></td><td>Moderate filtering</td>
+    <td>Good balance between smoothness and detail retention</td></tr>
+<tr><td><b>4&ndash;5</b></td><td>Light filtering</td>
+    <td>More detail preserved, some blocking may appear at low bitrates</td></tr>
+<tr><td><b>6&ndash;7</b></td><td>Minimal filtering</td>
+    <td>Maximum detail but risk of visible blocking artefacts</td></tr>
+</table>
+
+<hr>
+
+<h3>When to Use</h3>
+<ul>
+<li><b>Detailed / textured content</b> (nature, fabric close-ups) &mdash; try <b>3&ndash;5</b>
+    to retain fine texture.</li>
+<li><b>Film grain content</b> &mdash; pair with <b>film-grain synthesis</b> and set
+    sharpness to <b>4&ndash;7</b> for maximum detail preservation.</li>
+<li><b>Animation / flat content</b> &mdash; keep at <b>0</b> for the cleanest look.</li>
+<li><b>Low bitrate encoding</b> &mdash; keep at <b>0&ndash;2</b> to avoid blocking.</li>
+</ul>
+
+<hr>
+
+<h3>Tips</h3>
+<ul>
+<li><b>Start with 0</b> (default) and only increase if you notice the output looks
+    softer than desired.</li>
+<li>Sharpness works well in combination with <b>film-grain synthesis</b> for
+    grainy film content.</li>
+<li>For SVT-AV1, sharpness and film-grain are combined automatically:
+    <code>-svtav1-params film-grain=8:sharpness=4</code></li>
+<li>Higher sharpness values save very little bitrate &mdash; don&rsquo;t use them
+    purely for file size reduction.</li>
+</ul>
+"""
+
+
+class SharpnessHelpDialog(HelpDialog):
+    def __init__(self, parent=None):
+        super().__init__("Sharpness Guide", SHARPNESS_HELP_TEXT, parent)
+
+
 class AboutDialog(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -671,7 +809,7 @@ class AboutDialog(QDialog):
         browser.setHtml("""
         <div style="text-align:center;">
         <h2>Video Codec Converter (VCC)</h2>
-        <p>Version 1.2</p>
+        <p>Version 1.2.1</p>
         <p>A graphical FFmpeg front-end for batch video transcoding.</p>
         <hr>
         <p style="color:#666;">Powered by FFmpeg<br>

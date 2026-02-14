@@ -17,7 +17,7 @@ from PyQt6.QtGui import QAction, QFont, QIcon, QDragEnterEvent, QDropEvent
 
 from vcc.core.codecs import CODECS
 from vcc.core.pixel_formats import PIXEL_FORMATS, query_encoder_pix_fmts
-from vcc.core.encoder import EncoderWorker
+from vcc.core.encoder import EncoderWorker, detect_crop, find_ffmpeg
 from vcc.core.gpu_detect import (
     probe_available_gpu_encoders, get_gpu_encoder, is_gpu_encoder, GpuEncoder,
 )
@@ -26,6 +26,7 @@ from vcc.ui.help_dialogs import (
     CodecHelpDialog, PixelFormatHelpDialog, AudioHelpDialog,
     ResolutionHelpDialog, FPSHelpDialog, BitrateHelpDialog, AboutDialog,
     GPUEncodingHelpDialog, OutputFormatHelpDialog,
+    FilmGrainHelpDialog, SharpnessHelpDialog,
 )
 from vcc.ui.themes import (
     LIGHT_THEME, DARK_THEME,
@@ -164,6 +165,99 @@ class TrimDialog(QDialog):
 
 
 # ---------------------------------------------------------------------------
+# Crop Dialog
+# ---------------------------------------------------------------------------
+class CropDialog(QDialog):
+    """Dialog for auto-detecting and setting crop values per file."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Auto-Crop")
+        self.setFixedSize(440, 220)
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(16, 16, 16, 16)
+        layout.setSpacing(12)
+
+        lbl = QLabel(
+            "Detect and remove black bars (letterbox/pillarbox).\n"
+            "Click 'Detect' to analyse the video, or enter a custom crop value."
+        )
+        lbl.setWordWrap(True)
+        layout.addWidget(lbl)
+
+        form = QFormLayout()
+        form.setSpacing(8)
+
+        detect_row = QHBoxLayout()
+        self._txt_crop = QLineEdit()
+        self._txt_crop.setPlaceholderText("e.g. crop=1920:800:0:140")
+        detect_row.addWidget(self._txt_crop)
+        self._btn_detect = QPushButton("Detect")
+        self._btn_detect.setFixedWidth(80)
+        self._btn_detect.clicked.connect(self._on_detect)
+        detect_row.addWidget(self._btn_detect)
+        form.addRow("Crop:", detect_row)
+
+        self._lbl_status = QLabel("")
+        self._lbl_status.setStyleSheet("color: #888; font-style: italic;")
+        form.addRow("", self._lbl_status)
+        layout.addLayout(form)
+
+        btn_row = QHBoxLayout()
+        self._btn_clear = QPushButton("Clear Crop")
+        self._btn_clear.clicked.connect(self._clear)
+        btn_row.addWidget(self._btn_clear)
+        btn_row.addStretch()
+
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
+        )
+        buttons.accepted.connect(self.accept)
+        buttons.rejected.connect(self.reject)
+        btn_row.addWidget(buttons)
+        layout.addLayout(btn_row)
+
+        self._filepath = ""  # set externally before exec
+
+    def set_filepath(self, filepath: str):
+        self._filepath = filepath
+
+    def set_crop(self, crop_val: str):
+        if crop_val:
+            self._txt_crop.setText(crop_val)
+
+    def get_crop(self) -> str:
+        """Return the crop filter string, or empty if cleared."""
+        val = self._txt_crop.text().strip()
+        if val and not val.startswith("crop="):
+            val = f"crop={val}"
+        return val
+
+    def _clear(self):
+        self._txt_crop.clear()
+        self._lbl_status.setText("")
+
+    def _on_detect(self):
+        if not self._filepath or not os.path.isfile(self._filepath):
+            self._lbl_status.setText("No valid file to detect.")
+            return
+        self._lbl_status.setText("Detecting crop... please wait.")
+        self._lbl_status.setStyleSheet("color: #1565c0; font-style: italic;")
+        QApplication.processEvents()
+
+        ffmpeg = find_ffmpeg()
+        result = detect_crop(ffmpeg, self._filepath)
+        if result:
+            self._txt_crop.setText(result)
+            self._lbl_status.setText(f"Detected: {result}")
+            self._lbl_status.setStyleSheet("color: #2e7d32; font-weight: bold;")
+        else:
+            self._lbl_status.setText("No crop detected (video may not have black bars).")
+            self._lbl_status.setStyleSheet("color: #c62828; font-style: italic;")
+
+
+# ---------------------------------------------------------------------------
 # Codec parameter widgets
 # ---------------------------------------------------------------------------
 class CodecParamWidget(QWidget):
@@ -249,6 +343,9 @@ class MainWindow(QMainWindow):
         # Per-file trim state: { filepath: (start_str, end_str) }
         self._file_trims: dict[str, tuple[str, str]] = {}
 
+        # Per-file crop state: { filepath: \"crop=W:H:X:Y\" }
+        self._file_crops: dict[str, str] = {}
+
         # Load theme preference
         self._settings = QSettings("VCC", "VideoCodecConverter")
         self._dark_mode = self._settings.value("dark_mode", False, type=bool)
@@ -328,6 +425,10 @@ class MainWindow(QMainWindow):
         help_menu.addAction(self._act_help_gpu)
         self._act_help_output_format = QAction("Output Format Guide...", self)
         help_menu.addAction(self._act_help_output_format)
+        self._act_help_film_grain = QAction("Film Grain Guide...", self)
+        help_menu.addAction(self._act_help_film_grain)
+        self._act_help_sharpness = QAction("Sharpness Guide...", self)
+        help_menu.addAction(self._act_help_sharpness)
         help_menu.addSeparator()
         self._act_about = QAction("About VCC...", self)
         help_menu.addAction(self._act_about)
@@ -700,6 +801,71 @@ class MainWindow(QMainWindow):
         row_trim.addStretch()
         enc_vlayout.addLayout(row_trim)
 
+        # Row 7: Auto-Crop
+        row_crop = QHBoxLayout()
+        lbl_crop = QLabel("Auto-Crop:")
+        lbl_crop.setFixedWidth(100)
+        row_crop.addWidget(lbl_crop)
+        self._btn_crop = QPushButton("Set Crop...")
+        self._btn_crop.setFixedWidth(120)
+        self._btn_crop.setToolTip("Detect and remove black bars per file.")
+        row_crop.addWidget(self._btn_crop)
+        self._lbl_crop_info = QLabel("No crop set")
+        self._lbl_crop_info.setStyleSheet("color: #888; font-style: italic;")
+        row_crop.addSpacing(12)
+        row_crop.addWidget(self._lbl_crop_info)
+        row_crop.addStretch()
+        enc_vlayout.addLayout(row_crop)
+
+        # Row 8: Film Grain (SVT-AV1)
+        row_grain = QHBoxLayout()
+        lbl_grain = QLabel("Film Grain:")
+        lbl_grain.setFixedWidth(100)
+        row_grain.addWidget(lbl_grain)
+        self._spn_film_grain = NoScrollSpinBox()
+        self._spn_film_grain.setMinimum(0)
+        self._spn_film_grain.setMaximum(50)
+        self._spn_film_grain.setValue(0)
+        self._spn_film_grain.setFixedWidth(80)
+        self._spn_film_grain.setToolTip(
+            "Film grain synthesis level (0 = off, 1-50).\n"
+            "Supported by SVT-AV1. Applied via -svtav1-params film-grain=N.\n\n"
+            "See Help → Film Grain Guide for details."
+        )
+        row_grain.addWidget(self._spn_film_grain)
+        row_grain.addSpacing(8)
+        grain_help = make_help_button(
+            "Film grain synthesis denoise + re-synthesis.\n"
+            "0 = off.  Higher values add more grain.\n\n"
+            "See Help → Film Grain Guide for details."
+        )
+        row_grain.addWidget(grain_help)
+
+        # Sharpness
+        row_grain.addSpacing(24)
+        lbl_sharp = QLabel("Sharpness:")
+        row_grain.addWidget(lbl_sharp)
+        self._spn_sharpness = NoScrollSpinBox()
+        self._spn_sharpness.setMinimum(0)
+        self._spn_sharpness.setMaximum(7)
+        self._spn_sharpness.setValue(0)
+        self._spn_sharpness.setFixedWidth(80)
+        self._spn_sharpness.setToolTip(
+            "Sharpness level (0 = off, 0-7).\n"
+            "Supported by SVT-AV1 (via -svtav1-params) and VP9 (via -sharpness).\n\n"
+            "See Help → Sharpness Guide for details."
+        )
+        row_grain.addWidget(self._spn_sharpness)
+        row_grain.addSpacing(8)
+        sharp_help = make_help_button(
+            "Controls loop filter sharpness.\n"
+            "0 = sharpest filtering.  7 = least filtering.\n\n"
+            "See Help → Sharpness Guide for details."
+        )
+        row_grain.addWidget(sharp_help)
+        row_grain.addStretch()
+        enc_vlayout.addLayout(row_grain)
+
         top_layout.addWidget(enc_group)
 
         # --- Codec-specific parameters (dynamic) ---
@@ -816,6 +982,8 @@ class MainWindow(QMainWindow):
         self._act_help_bitrate.triggered.connect(lambda: BitrateHelpDialog(self).exec())
         self._act_help_gpu.triggered.connect(lambda: GPUEncodingHelpDialog(self).exec())
         self._act_help_output_format.triggered.connect(lambda: OutputFormatHelpDialog(self).exec())
+        self._act_help_film_grain.triggered.connect(lambda: FilmGrainHelpDialog(self).exec())
+        self._act_help_sharpness.triggered.connect(lambda: SharpnessHelpDialog(self).exec())
         self._act_about.triggered.connect(lambda: AboutDialog(self).exec())
 
         # Presets
@@ -832,6 +1000,7 @@ class MainWindow(QMainWindow):
         self._btn_start.clicked.connect(self._start_encoding)
         self._btn_cancel.clicked.connect(self._cancel_encoding)
         self._btn_trim.clicked.connect(self._open_trim_dialog)
+        self._btn_crop.clicked.connect(self._open_crop_dialog)
 
         # Codec change -> rebuild params
         self._cmb_codec.currentIndexChanged.connect(self._on_codec_changed)
@@ -930,6 +1099,49 @@ class MainWindow(QMainWindow):
             self._lbl_trim_info.setStyleSheet("color: #888; font-style: italic;")
 
     # ------------------------------------------------------------------
+    # Crop dialog
+    # ------------------------------------------------------------------
+    def _open_crop_dialog(self):
+        """Open a crop dialog for the selected file(s) in the input list."""
+        selected = self._file_list.selectedItems()
+        if not selected:
+            if self._file_list.count() == 0:
+                QMessageBox.information(self, "No Files", "Please add video files first.")
+                return
+            QMessageBox.information(
+                self, "Select File",
+                "Please select one or more files in the input list to set crop."
+            )
+            return
+
+        for item in selected:
+            filepath = item.data(Qt.ItemDataRole.UserRole)
+            filename = os.path.basename(filepath)
+            existing = self._file_crops.get(filepath, "")
+            dlg = CropDialog(self)
+            dlg.setWindowTitle(f"Auto-Crop — {filename}")
+            dlg.set_filepath(filepath)
+            dlg.set_crop(existing)
+            if dlg.exec() == QDialog.DialogCode.Accepted:
+                crop_val = dlg.get_crop()
+                if crop_val:
+                    self._file_crops[filepath] = crop_val
+                else:
+                    self._file_crops.pop(filepath, None)
+            else:
+                break  # user cancelled, stop iterating
+        self._update_crop_label()
+
+    def _update_crop_label(self):
+        cropped_count = len(self._file_crops)
+        if cropped_count > 0:
+            self._lbl_crop_info.setText(f"{cropped_count} file(s) cropped")
+            self._lbl_crop_info.setStyleSheet("color: #2e7d32; font-weight: bold;")
+        else:
+            self._lbl_crop_info.setText("No crop set")
+            self._lbl_crop_info.setStyleSheet("color: #888; font-style: italic;")
+
+    # ------------------------------------------------------------------
     # Preset Profiles
     # ------------------------------------------------------------------
     def _get_presets_dir(self) -> str:
@@ -956,6 +1168,8 @@ class MainWindow(QMainWindow):
             "concat": self._chk_concat.isChecked(),
             "trim_start": "",
             "trim_end": "",
+            "film_grain": self._spn_film_grain.value(),
+            "sharpness": self._spn_sharpness.value(),
         }
 
     def _apply_settings(self, settings: dict):
@@ -982,9 +1196,13 @@ class MainWindow(QMainWindow):
                 self._cmb_output_format.setCurrentIndex(ofi)
             self._chk_overwrite.setChecked(settings.get("overwrite", False))
             self._chk_concat.setChecked(settings.get("concat", False))
-            # Presets don't store per-file trims – just clear
+            self._spn_film_grain.setValue(settings.get("film_grain", 0))
+            self._spn_sharpness.setValue(settings.get("sharpness", 0))
+            # Presets don't store per-file trims/crops – just clear
             self._file_trims.clear()
+            self._file_crops.clear()
             self._update_trim_label()
+            self._update_crop_label()
             self._on_fps_preset_changed(self._cmb_fps.currentIndex())
         except Exception:
             pass
@@ -1081,15 +1299,19 @@ class MainWindow(QMainWindow):
         for item in self._file_list.selectedItems():
             filepath = item.data(Qt.ItemDataRole.UserRole)
             self._file_trims.pop(filepath, None)
+            self._file_crops.pop(filepath, None)
             self._file_list.takeItem(self._file_list.row(item))
         self._update_file_count()
         self._update_trim_label()
+        self._update_crop_label()
 
     def _clear_files(self):
         self._file_list.clear()
         self._file_trims.clear()
+        self._file_crops.clear()
         self._update_file_count()
         self._update_trim_label()
+        self._update_crop_label()
 
     def _update_file_count(self):
         count = self._file_list.count()
@@ -1331,7 +1553,11 @@ class MainWindow(QMainWindow):
         self._chk_overwrite.setChecked(False)
         self._chk_concat.setChecked(False)
         self._file_trims.clear()
+        self._file_crops.clear()
         self._update_trim_label()
+        self._update_crop_label()
+        self._spn_film_grain.setValue(0)
+        self._spn_sharpness.setValue(0)
         self._on_codec_changed()
         self.statusBar().showMessage("Settings reset to defaults")
 
@@ -1390,7 +1616,10 @@ class MainWindow(QMainWindow):
             overwrite=self._chk_overwrite.isChecked(),
             output_format=self._cmb_output_format.currentData() or "",
             file_trims=self._file_trims,
+            file_crops=self._file_crops,
             concatenate=self._chk_concat.isChecked(),
+            film_grain=self._spn_film_grain.value(),
+            sharpness=self._spn_sharpness.value(),
         )
 
         self._worker.log_output.connect(self._terminal.append_text)

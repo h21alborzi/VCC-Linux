@@ -9,7 +9,7 @@ A desktop GUI application for batch video transcoding using **FFmpeg**. VCC prov
 ![Platform](https://img.shields.io/badge/platform-Windows-blue)
 ![Python](https://img.shields.io/badge/python-3.12-green)
 ![License](https://img.shields.io/badge/license-MIT-brightgreen)
-![Release](https://img.shields.io/badge/release-v1.2-orange)
+![Release](https://img.shields.io/badge/release-v1.2.1-orange)
 
 ---
 
@@ -28,8 +28,11 @@ A desktop GUI application for batch video transcoding using **FFmpeg**. VCC prov
 - **Video Trimming** — Set start/end times to trim videos during conversion
 - **Output Format Selection** — Choose from 14 container formats (MKV, MP4, WebM, AVI, MOV, TS, FLV, WMV, OGG, M4V, MPG, 3GP, MXF) which are codec-aware or auto-detect
 - **Concatenate / Merge** — Merge multiple video files into a single output file
+- **Auto-Crop** — Detect and remove black bars (letterbox/pillarbox) per file using FFmpeg cropdetect
+- **Film Grain Synthesis** — SVT-AV1 film grain synthesis for efficient grain encoding (0–50)
+- **Sharpness Control** — Loop filter sharpness for SVT-AV1 and VP9 (0–7)
 - **Embedded Terminal** — Live FFmpeg output displayed in the app
-- **Built-in Help** — Menu bar with Codec, Pixel Format, Audio, Resolution, FPS, Bitrate, and GPU Encoding guides
+- **Built-in Help** — Menu bar with Codec, Pixel Format, Audio, Resolution, FPS, Bitrate, GPU Encoding, Film Grain, and Sharpness guides
 - **Dark / Light Theme** — Toggle between dark and light mode via Settings menu (preference saved across sessions)
 - **Scroll-safe Controls** — Mouse wheel won't accidentally change dropdown values
 - **Single EXE** — Standalone `.exe`, no Python installation required for end users
@@ -199,6 +202,7 @@ MIT License — free for personal and commercial use.
 
 ## Version History
 
+- **v1.2.1** — Auto-crop per file (detect and remove black bars via FFmpeg cropdetect), film grain synthesis control (SVT-AV1, 0–50), sharpness control (SVT-AV1 / VP9, 0–7), Film Grain and Sharpness help guides, subtitle auto-fix for MP4 containers
 - **v1.2** — Drag & drop file import, preset profiles (save/load/delete encoding settings), video trimming (start/end time), output format selection with codec-aware filtering (14 containers), concatenate/merge multiple files, batch progress bar, scroll-safe combo boxes, application icon on title bar and taskbar
 - **v1.1.1** — Fixed audio/subtitle dropdowns being editable, fixed OS dark theme interfering with app themes
 - **v1.1** — GPU-accelerated encoding (NVIDIA NVENC, AMD AMF, Intel QSV) with parallel auto-detection, smart pixel format filtering per encoder, comprehensive help text with parameter tables, faster startup via parallel GPU probing

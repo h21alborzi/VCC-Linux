@@ -84,6 +84,40 @@ def _parse_time_to_seconds(time_str: str) -> float:
     return float(time_str)
 
 
+def detect_crop(ffmpeg_path: str, filepath: str, skip_seconds: int = 60,
+                analyse_duration: int = 5) -> str | None:
+    """Run FFmpeg cropdetect on a video file and return the crop value.
+
+    Analyses *analyse_duration* seconds of video starting at *skip_seconds*
+    (to avoid title cards / black intros).  Returns a string like
+    ``"crop=1920:800:0:140"`` or *None* on failure.
+    """
+    try:
+        args = [
+            ffmpeg_path, "-hide_banner",
+            "-ss", str(skip_seconds),
+            "-i", filepath,
+            "-t", str(analyse_duration),
+            "-vf", "cropdetect=24:16:0",
+            "-an", "-sn",
+            "-f", "null", "-",
+        ]
+        r = subprocess.run(
+            args,
+            capture_output=True, text=True, timeout=30,
+            creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+        )
+        # Parse the last cropdetect line
+        crop_val = None
+        for line in r.stderr.splitlines():
+            if "crop=" in line:
+                idx = line.rfind("crop=")
+                crop_val = line[idx:].split()[0]  # e.g. "crop=1920:800:0:140"
+        return crop_val
+    except Exception:
+        return None
+
+
 class EncoderWorker(QThread):
     """
     Runs FFmpeg encoding for a list of files.
@@ -114,7 +148,10 @@ class EncoderWorker(QThread):
         overwrite: bool = False,
         output_format: str = "",
         file_trims: dict[str, tuple[str, str]] | None = None,
+        file_crops: dict[str, str] | None = None,
         concatenate: bool = False,
+        film_grain: int = 0,
+        sharpness: int = 0,
         parent=None,
     ):
         super().__init__(parent)
@@ -132,7 +169,10 @@ class EncoderWorker(QThread):
         self.overwrite = overwrite
         self.output_format = output_format  # e.g. "mp4", "mkv", "" = auto
         self.file_trims = file_trims or {}  # {filepath: (start, end)}
+        self.file_crops = file_crops or {}  # {filepath: "crop=W:H:X:Y"}
         self.concatenate = concatenate
+        self.film_grain = film_grain     # 0 = off, 1-50 for SVT-AV1
+        self.sharpness = sharpness       # 0 = off, 0-7 for SVT-AV1 / libvpx-vp9
         self._cancelled = False
         self._ffmpeg_path = find_ffmpeg()
         self._gpu_enc = get_gpu_encoder(self.codec) if is_gpu_encoder(self.codec) else None
@@ -145,9 +185,16 @@ class EncoderWorker(QThread):
     def build_ffmpeg_args(self, src: str, dst: str) -> list[str]:
         """Build the ffmpeg argument list for a single file."""
         ow_flag = "-y" if self.overwrite else "-n"
-        scale_filter = f"scale={self.width}:{self.height}"
         has_bitrate = bool(self.bitrate and self.bitrate.strip())
         gpu = self._gpu_enc
+
+        # Build the -vf filter chain: crop (if set) then scale
+        vf_parts = []
+        crop_val = self.file_crops.get(src, "")
+        if crop_val:
+            vf_parts.append(crop_val)  # e.g. "crop=1920:800:0:140"
+        vf_parts.append(f"scale={self.width}:{self.height}")
+        vf_chain = ",".join(vf_parts)
 
         # Per-file trim times
         trim_start, trim_end = self.file_trims.get(src, ("", ""))
@@ -180,7 +227,7 @@ class EncoderWorker(QThread):
             "-map", "0:v:0",
             "-map", "0:a?",
             "-map", "0:s?",
-            "-vf", scale_filter,
+            "-vf", vf_chain,
             "-c:v", self.codec,
         ])
 
@@ -211,6 +258,24 @@ class EncoderWorker(QThread):
             # SVT-AV1 defaults to CQ mode (rc=0) which rejects -b:v
             if has_bitrate and self.codec == "libsvtav1":
                 args.extend(["-svtav1-params", "rc=1"])
+
+        # SVT-AV1 film-grain & sharpness (passed via -svtav1-params)
+        if self.codec == "libsvtav1":
+            svt_extra = []
+            if self.film_grain > 0:
+                svt_extra.append(f"film-grain={self.film_grain}")
+            if self.sharpness > 0:
+                svt_extra.append(f"sharpness={self.sharpness}")
+            if svt_extra:
+                # Check if -svtav1-params already in args (from bitrate VBR)
+                svt_str = ":".join(svt_extra)
+                try:
+                    idx = args.index("-svtav1-params")
+                    args[idx + 1] += ":" + svt_str
+                except ValueError:
+                    args.extend(["-svtav1-params", svt_str])
+        elif self.codec == "libvpx-vp9" and self.sharpness > 0:
+            args.extend(["-sharpness", str(self.sharpness)])
 
         if self.pix_fmt and self.pix_fmt.strip():
             args.extend(["-pix_fmt", self.pix_fmt])
